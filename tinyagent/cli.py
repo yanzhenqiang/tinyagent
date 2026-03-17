@@ -1,0 +1,195 @@
+import asyncio
+from pathlib import Path
+import typer
+from rich.console import Console
+
+from tinyagent import __logo__
+from tinyagent.config import Config, get_workspace_path
+
+app = typer.Typer(
+    name="tinyagent",
+    help=f"{__logo__} tinyagent - Personal AI Assistant",
+    no_args_is_help=True,
+)
+
+console = Console()
+
+
+def version_callback(value: bool):
+    if value:
+        console.print(f"{__logo__} tinyagent")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    _version: bool = typer.Option(  # noqa: ARG001
+        None, "--version", "-v", callback=version_callback, is_eager=True
+    ),
+):
+    pass
+
+
+def _load_config(config_path: str | None) -> Config:
+    from tinyagent.config import (
+        get_config_path,
+        load_config,
+        save_config,
+        set_config_path,
+    )
+
+    if config_path:
+        path = Path(config_path).expanduser().resolve()
+        if not path.exists():
+            console.print(f"[red]Error: Config file not found: {path}[/red]")
+            raise typer.Exit(1)
+        set_config_path(path)
+        console.print(f"[dim]Using config: {path}[/dim]")
+    else:
+        path = get_config_path()
+
+    if not path.exists():
+        save_config(Config(), path)
+        console.print(f"[green]✓[/green] Created config at {path}")
+
+    return load_config(path)
+
+
+def _init_workspace(config: Config, workspace: str | None) -> Path:
+    if workspace:
+        config.agent.workspace = workspace
+        ws_path = Path(workspace).expanduser()
+    else:
+        ws_path = get_workspace_path()
+
+    if not ws_path.exists():
+        ws_path.mkdir(parents=True, exist_ok=True)
+        console.print(f"[green]✓[/green] Created workspace at {ws_path}")
+        import shutil
+        from importlib.resources import files
+        templates = files("tinyagent") / "templates"
+        if templates.exists():
+            shutil.copytree(templates, ws_path, dirs_exist_ok=True)
+    else:
+        console.print(f"[yellow]Workspace already exists at {ws_path}[/yellow]")
+
+    return ws_path
+
+
+@app.command()
+def gateway(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    from tinyagent.agent import Agent
+    from tinyagent.channel_feishu import FeishuChannel
+
+    cfg = _load_config(config)
+    ws_path = _init_workspace(cfg, workspace)
+    cfg.agent.workspace = str(ws_path)
+    async def run():
+        agent = Agent(cfg, ws_path)
+        feishu_ch = FeishuChannel(cfg.channel.feishu, agent.bus, cfg.channel)
+
+        try:
+            await agent.start()
+            await feishu_ch.start()
+        except KeyboardInterrupt:
+            console.print("\nShutting down...")
+        except Exception:
+            import traceback
+            console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
+            console.print(traceback.format_exc())
+        finally:
+            await feishu_ch.stop()
+            await agent.stop()
+
+    asyncio.run(run())
+
+
+@app.command()
+def chat(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    from tinyagent.agent import Agent
+    from tinyagent.channel_terminal import TerminalChannel
+
+    cfg = _load_config(config)
+    ws_path = _init_workspace(cfg, workspace)
+    cfg.agent.workspace = str(ws_path)
+    class TerminalConfig:
+        allow_from = ["*"]
+    async def run():
+        agent = Agent(cfg, ws_path)
+        terminal = TerminalChannel(TerminalConfig(), agent.bus)
+
+        try:
+            await agent.start()
+            await terminal.start()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            await terminal.stop()
+            await agent.stop()
+
+    asyncio.run(run())
+
+
+@app.command()
+def message(
+    content: str = typer.Argument(..., help="Message to send"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    chat_id: str = typer.Option("cli", "--chat-id", help="Chat session ID"),
+):
+    """Send a single message and get a response."""
+    from tinyagent.agent import Agent
+
+    cfg = _load_config(config)
+    ws_path = _init_workspace(cfg, workspace)
+
+    async def run():
+        async with Agent(cfg, ws_path, enable_cron=False) as agent:
+            response = await agent.process_message(
+                content=content,
+                channel="cli",
+                chat_id=chat_id,
+                sender_id="user",
+            )
+            if response:
+                console.print(response)
+
+    asyncio.run(run())
+
+
+@app.command()
+def status():
+    from tinyagent.config import get_config_path, load_config
+
+    config_path = get_config_path()
+    cfg = load_config(config_path)
+    workspace = cfg.workspace_path
+    console.print(f"{__logo__} tinyagent Status\n")
+    console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
+    console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
+
+    if config_path.exists():
+        from tinyagent.provider import PROVIDERS
+        console.print(f"Model: {cfg.agent.model}")
+        for spec in PROVIDERS:
+            p = getattr(cfg.provider, spec.name, None)
+            if p is None:
+                continue
+            has_key = bool(p.api_key)
+            console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}"  )
+
+        # Show channel status
+        console.print()
+        feishu_cfg = getattr(cfg.channel, "feishu", None)
+        status = "[green]✓[/green]" if feishu_cfg else "[dim]not set[/dim]"
+        console.print(f"Feishu: {status}")
+
+
+if __name__ == "__main__":
+    app()
