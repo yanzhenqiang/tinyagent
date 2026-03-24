@@ -9,12 +9,14 @@ from tinyagent import __logo__
 from tinyagent.config import Config, get_workspace_path
 
 
-def _setup_logging():
+def _setup_logging(stderr=False):
     from loguru import logger
     from tinyagent.config import get_logs_dir
     log_dir = get_logs_dir()
     logger.remove()
     logger.add(log_dir / "tinyagent.log", rotation="1 day", retention="7 days")
+    if stderr:
+        logger.add(lambda msg: print(msg, end=""), filter=lambda rec: rec["level"].name != "DEBUG")
 
 
 class NoOptionsGroup(TyperGroup):
@@ -84,7 +86,10 @@ def _init_workspace(config: Config, workspace: str | None) -> Path:
 def gateway(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    logs: bool = typer.Option(False, "--logs", help="Show logs in terminal"),
 ):
+    if logs:
+        _setup_logging(stderr=True)
     from tinyagent.agent import Agent
     from tinyagent.channel_feishu import FeishuChannel
 
@@ -115,7 +120,10 @@ def gateway(
 def chat(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    logs: bool = typer.Option(False, "--logs", help="Show logs in terminal"),
 ):
+    if logs:
+        _setup_logging(stderr=True)
     from tinyagent.agent import Agent
     from tinyagent.channel_terminal import TerminalChannel
 
@@ -146,8 +154,11 @@ def message(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     chat_id: str = typer.Option("cli", "--chat-id", help="Chat session ID"),
+    logs: bool = typer.Option(False, "--logs", help="Show logs in terminal"),
 ):
     """Send a single message and get a response."""
+    if logs:
+        _setup_logging(stderr=True)
     from tinyagent.agent import Agent
 
     cfg = _load_config(config)
