@@ -391,7 +391,7 @@ class FeishuChannel(BaseChannel):
                 await self.bus.outbound.put(OutboundMessage(
                     channel="feishu",
                     chat_id=chat_id,
-                    content="Bot restarted.",
+                    content="Agent restarted.",
                 ))
             del os.environ["TINYAGENT_RESTART"]
         except Exception:
