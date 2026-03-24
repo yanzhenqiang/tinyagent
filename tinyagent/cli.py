@@ -8,26 +8,12 @@ from tinyagent.config import Config, get_workspace_path
 
 app = typer.Typer(
     name="tinyagent",
-    help=f"{__logo__} tinyagent - Personal AI Assistant",
+    help="tinyagent",
     no_args_is_help=True,
+    add_completion=False,
 )
 
 console = Console()
-
-
-def version_callback(value: bool):
-    if value:
-        console.print(f"{__logo__} tinyagent")
-        raise typer.Exit()
-
-
-@app.callback()
-def main(
-    _version: bool = typer.Option(  # noqa: ARG001
-        None, "--version", "-v", callback=version_callback, is_eager=True
-    ),
-):
-    pass
 
 
 def _load_config(config_path: str | None) -> Config:
@@ -76,7 +62,7 @@ def _init_workspace(config: Config, workspace: str | None) -> Path:
     return ws_path
 
 
-@app.command()
+@app.command("gateway", help="Start gateway server.")
 def gateway(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -107,7 +93,7 @@ def gateway(
     asyncio.run(run())
 
 
-@app.command()
+@app.command("chat", help="Interactive chat mode.")
 def chat(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -136,7 +122,7 @@ def chat(
     asyncio.run(run())
 
 
-@app.command()
+@app.command("message", help="Send a single message.")
 def message(
     content: str = typer.Argument(..., help="Message to send"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
@@ -163,7 +149,7 @@ def message(
     asyncio.run(run())
 
 
-@app.command()
+@app.command("status", help="Show status.")
 def status():
     from tinyagent.config import get_config_path, load_config
 
