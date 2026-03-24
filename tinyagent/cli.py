@@ -162,20 +162,33 @@ def message(
     if logs:
         _setup_logging(stderr=True)
     from tinyagent.agent import Agent
+    from tinyagent.channel_direct import DirectChannel
 
     cfg = _load_config(config)
     ws_path = _init_workspace(cfg, workspace)
 
     async def run():
-        async with Agent(cfg, ws_path, enable_cron=False) as agent:
-            response = await agent.process_message(
+        agent = Agent(cfg, ws_path, enable_cron=False)
+        direct = DirectChannel(None, agent.bus)
+
+        try:
+            await agent.start()
+            channel_task = asyncio.create_task(direct.start())
+            response = await direct.send_message_and_wait(
                 content=content,
-                channel="cli",
-                chat_id=chat_id,
                 sender_id="user",
+                chat_id=chat_id,
             )
             if response:
                 console.print(response)
+            await direct.stop()
+            channel_task.cancel()
+            try:
+                await channel_task
+            except asyncio.CancelledError:
+                pass
+        finally:
+            await agent.stop()
 
     asyncio.run(run())
 
