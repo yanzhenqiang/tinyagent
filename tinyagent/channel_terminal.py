@@ -7,7 +7,6 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from rich.console import Console
-from rich.markdown import Markdown
 
 from tinyagent import __logo__
 from tinyagent.bus import MessageBus, OutboundMessage
@@ -33,15 +32,12 @@ class TerminalChannel(BaseChannel):
     async def start(self) -> None:
         self._running = True
         self._current_response = None
-        self.console.print(f"{__logo__} Terminal chat started. Press Ctrl+C to exit.")
-        self.console.print()
-
         outbound_task = asyncio.create_task(self._dispatch_outbound())
 
         while self._running and not self._stop_requested:
             try:
                 user_input = await self._session.prompt_async(
-                    "\033[36mYou>\033[0m ",
+                    "You> ",
                     key_bindings=self._bindings,
                 )
                 user_input = user_input.strip()
@@ -80,7 +76,7 @@ class TerminalChannel(BaseChannel):
     async def _show_spinner_until_response(self) -> None:
         spinner = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
         while not self._response_event.is_set():
-            sys.stdout.write(f"\r\033[2m{next(spinner)} Thinking...\033[0m")
+            sys.stdout.write(f"\r{next(spinner)} Thinking...")
             sys.stdout.flush()
             try:
                 await asyncio.wait_for(self._response_event.wait(), timeout=0.1)
@@ -89,7 +85,7 @@ class TerminalChannel(BaseChannel):
         sys.stdout.write("\r" + " " * 20 + "\r")
         sys.stdout.flush()
         if self._current_response:
-            print(f"\033[32m{__logo__}>\033[0m {self._current_response}")
+            print(f"{__logo__}> {self._current_response}")
             print()
 
     async def _dispatch_outbound(self) -> None:
