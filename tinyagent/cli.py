@@ -37,6 +37,7 @@ console = Console()
 
 
 def _load_config(config_path: str | None) -> Config:
+    from loguru import logger
     from tinyagent.config import (
         get_config_path,
         load_config,
@@ -50,18 +51,19 @@ def _load_config(config_path: str | None) -> Config:
             console.print(f"[red]Error: Config file not found: {path}[/red]")
             raise typer.Exit(1)
         set_config_path(path)
-        console.print(f"[dim]Using config: {path}[/dim]")
+        logger.info("Using config: {}", path)
     else:
         path = get_config_path()
 
     if not path.exists():
         save_config(Config(), path)
-        console.print(f"[green]✓[/green] Created config at {path}")
+        logger.info("Created config at {}", path)
 
     return load_config(path)
 
 
 def _init_workspace(config: Config, workspace: str | None) -> Path:
+    from loguru import logger
     if workspace:
         config.agent.workspace = workspace
         ws_path = Path(workspace).expanduser()
@@ -70,14 +72,14 @@ def _init_workspace(config: Config, workspace: str | None) -> Path:
 
     if not ws_path.exists():
         ws_path.mkdir(parents=True, exist_ok=True)
-        console.print(f"[green]✓[/green] Created workspace at {ws_path}")
+        logger.info("Created workspace at {}", ws_path)
         import shutil
         from importlib.resources import files
         templates = files("tinyagent") / "templates"
         if templates.exists():
             shutil.copytree(templates, ws_path, dirs_exist_ok=True)
     else:
-        console.print(f"[yellow]Workspace already exists at {ws_path}[/yellow]")
+        logger.info("Workspace already exists at {}", ws_path)
 
     return ws_path
 
