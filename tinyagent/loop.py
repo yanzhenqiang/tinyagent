@@ -223,6 +223,8 @@ class AgentLoop:
                 await self._handle_stop(msg)
             elif cmd == "/restart":
                 await self._handle_restart(msg)
+            elif cmd == "/status":
+                await self._handle_status(msg)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
@@ -254,6 +256,20 @@ class AgentLoop:
             os.execv(sys.executable, [sys.executable, "-m", "tinyagent"] + sys.argv[1:])
 
         asyncio.create_task(_do_restart())
+
+    async def _handle_status(self, msg: InboundMessage) -> None:
+        from tinyagent.provider import PROVIDERS
+        lines = ["🐍 tinyagent Status\n"]
+        lines.append(f"Model: {self.model}")
+        for spec in PROVIDERS:
+            p = getattr(self.provider.config if hasattr(self.provider, 'config') else self.provider, spec.name, None)
+            if p is None:
+                continue
+            has_key = bool(p.api_key if hasattr(p, 'api_key') else False)
+            lines.append(f"{spec.label}: {'✓' if has_key else 'not set'}")
+        await self.bus.outbound.put(OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
+        ))
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         async with self._processing_lock:

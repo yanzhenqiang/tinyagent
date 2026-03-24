@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import typer
 from rich.console import Console
@@ -84,6 +85,23 @@ def _init_workspace(config: Config, workspace: str | None) -> Path:
     return ws_path
 
 
+async def _run_agent_loop(agent, channel, error_msg: str | None = None):
+    try:
+        await agent.start()
+        await channel.start()
+    except KeyboardInterrupt:
+        pass
+    except Exception:
+        if error_msg:
+            import traceback
+            console.print(f"\n[red]Error: {error_msg}[/red]")
+            console.print(traceback.format_exc())
+        raise
+    finally:
+        await channel.stop()
+        await agent.stop()
+
+
 @app.command("gateway", help="Start gateway server.")
 def gateway(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
@@ -98,24 +116,13 @@ def gateway(
     cfg = _load_config(config)
     ws_path = _init_workspace(cfg, workspace)
     cfg.agent.workspace = str(ws_path)
-    async def run():
-        agent = Agent(cfg, ws_path)
-        feishu_ch = FeishuChannel(cfg.channel.feishu, agent.bus, cfg.channel)
+    agent = Agent(cfg, ws_path)
+    channel = FeishuChannel(cfg.channel.feishu, agent.bus, cfg.channel)
 
-        try:
-            await agent.start()
-            await feishu_ch.start()
-        except KeyboardInterrupt:
-            console.print("\nShutting down...")
-        except Exception:
-            import traceback
-            console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
-            console.print(traceback.format_exc())
-        finally:
-            await feishu_ch.stop()
-            await agent.stop()
-
-    asyncio.run(run())
+    try:
+        asyncio.run(_run_agent_loop(agent, channel, "Gateway crashed unexpectedly"))
+    except KeyboardInterrupt:
+        console.print("\nShutting down...")
 
 
 @app.command("chat", help="Interactive chat mode.")
@@ -132,22 +139,9 @@ def chat(
     cfg = _load_config(config)
     ws_path = _init_workspace(cfg, workspace)
     cfg.agent.workspace = str(ws_path)
-    class TerminalConfig:
-        allow_from = ["*"]
-    async def run():
-        agent = Agent(cfg, ws_path)
-        terminal = TerminalChannel(TerminalConfig(), agent.bus)
-
-        try:
-            await agent.start()
-            await terminal.start()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            await terminal.stop()
-            await agent.stop()
-
-    asyncio.run(run())
+    agent = Agent(cfg, ws_path)
+    channel = TerminalChannel(SimpleNamespace(allow_from=["*"]), agent.bus)
+    asyncio.run(_run_agent_loop(agent, channel))
 
 
 @app.command("message", help="Send a single message.")
@@ -158,67 +152,28 @@ def message(
     chat_id: str = typer.Option("cli", "--chat-id", help="Chat session ID"),
     logs: bool = typer.Option(False, "--logs", help="Show logs in terminal"),
 ):
-    """Send a single message and get a response."""
     if logs:
         _setup_logging(stderr=True)
     from tinyagent.agent import Agent
-    from tinyagent.channel_direct import DirectChannel
+    from tinyagent.channel_base import BaseChannel
 
     cfg = _load_config(config)
     ws_path = _init_workspace(cfg, workspace)
-
-    async def run():
-        agent = Agent(cfg, ws_path, enable_cron=False)
-        direct = DirectChannel(None, agent.bus)
-
-        try:
-            await agent.start()
-            channel_task = asyncio.create_task(direct.start())
-            response = await direct.send_message_and_wait(
-                content=content,
-                sender_id="user",
-                chat_id=chat_id,
-            )
-            if response:
-                console.print(response)
-            await direct.stop()
-            channel_task.cancel()
-            try:
-                await channel_task
-            except asyncio.CancelledError:
-                pass
-        finally:
-            await agent.stop()
-
-    asyncio.run(run())
+    agent = Agent(cfg, ws_path, enable_cron=False)
+    channel = BaseChannel(SimpleNamespace(allow_from=["*"]), agent.bus, content, chat_id)
+    asyncio.run(_run_agent_loop(agent, channel))
 
 
 @app.command("status", help="Show status.")
 def status():
-    from tinyagent.config import get_config_path, load_config
+    from tinyagent.agent import Agent
+    from tinyagent.channel_base import BaseChannel
 
-    config_path = get_config_path()
-    cfg = load_config(config_path)
-    workspace = cfg.workspace_path
-    console.print(f"{__logo__} tinyagent Status\n")
-    console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
-    console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
-
-    if config_path.exists():
-        from tinyagent.provider import PROVIDERS
-        console.print(f"Model: {cfg.agent.model}")
-        for spec in PROVIDERS:
-            p = getattr(cfg.provider, spec.name, None)
-            if p is None:
-                continue
-            has_key = bool(p.api_key)
-            console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}"  )
-
-        # Show channel status
-        console.print()
-        feishu_cfg = getattr(cfg.channel, "feishu", None)
-        status = "[green]✓[/green]" if feishu_cfg else "[dim]not set[/dim]"
-        console.print(f"Feishu: {status}")
+    cfg = _load_config(None)
+    ws_path = _init_workspace(cfg, None)
+    agent = Agent(cfg, ws_path, enable_cron=False)
+    channel = BaseChannel(SimpleNamespace(allow_from=["*"]), agent.bus, "/status", "cli")
+    asyncio.run(_run_agent_loop(agent, channel))
 
 
 if __name__ == "__main__":

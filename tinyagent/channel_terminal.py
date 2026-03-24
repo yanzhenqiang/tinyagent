@@ -88,19 +88,6 @@ class TerminalChannel(BaseChannel):
             print(f"{__logo__}> {self._current_response}")
             print()
 
-    async def _dispatch_outbound(self) -> None:
-        while self._running:
-            try:
-                msg = await asyncio.wait_for(self.bus.outbound.get(), timeout=1.0)
-                await self.send(msg)
-            except asyncio.TimeoutError:
-                continue
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                from loguru import logger
-                logger.exception("Error in terminal outbound dispatch")
-
     async def stop(self) -> None:
         self._running = False
         self._stop_requested = True

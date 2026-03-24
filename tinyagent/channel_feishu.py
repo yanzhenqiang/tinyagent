@@ -329,49 +329,14 @@ class FeishuChannel(BaseChannel):
         self._ws_thread.start()
         logger.info("Feishu bot started with WebSocket long connection")
 
-        # Start outbound message dispatcher
         self._outbound_task = asyncio.create_task(self._dispatch_outbound())
-
-        # Send startup message if restarted
         await self._send_startup_message()
 
         while self._running:
             await asyncio.sleep(1)
 
-    async def _dispatch_outbound(self) -> None:
-        """Consume outbound messages and send to Feishu."""
-        while self._running:
-            try:
-                msg = await asyncio.wait_for(self.bus.outbound.get(), timeout=1.0)
-
-                # Filter progress messages based on config
-                if msg.metadata.get("_progress") and self._channel_config:
-                    if msg.metadata.get("_tool_hint") and not self._channel_config.send_tool_hints:
-                        continue
-                    if not msg.metadata.get("_tool_hint") and not self._channel_config.send_progress:
-                        continue
-
-                if msg.channel == "feishu":
-                    try:
-                        await self.send(msg)
-                    except Exception as e:
-                        logger.error("Error sending to feishu: {}", e)
-            except asyncio.TimeoutError:
-                continue
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("Error in outbound dispatcher: {}", e)
-
     async def stop(self) -> None:
-        """
-        Notice: lark.ws.Client does not expose stop method， simply exiting the program will close the client.
-
-        Reference: https://github.com/larksuite/oapi-sdk-python/blob/v2_main/lark_oapi/ws/client.py#L86
-        """
         self._running = False
-
-        # Cancel outbound dispatcher
         if self._outbound_task:
             self._outbound_task.cancel()
             try:
@@ -914,6 +879,13 @@ class FeishuChannel(BaseChannel):
             return False
 
     async def send(self, msg: OutboundMessage) -> None:
+        if msg.channel != "feishu":
+            return
+        if msg.metadata.get("_progress") and self._channel_config:
+            if msg.metadata.get("_tool_hint") and not self._channel_config.send_tool_hints:
+                return
+            if not msg.metadata.get("_tool_hint") and not self._channel_config.send_progress:
+                return
         if not self._client:
             logger.warning("Feishu client not initialized")
             return

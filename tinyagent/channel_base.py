@@ -1,3 +1,4 @@
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -10,23 +11,46 @@ class BaseChannel(ABC):
     name: str = "base"
     display_name: str = "Base"
     transcription_api_key: str = ""
+    _dispatch_timeout: float = 1.0
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(self, config: Any, bus: MessageBus, content: str | None = None, chat_id: str = "cli"):
         self.config = config
         self.bus = bus
         self._running = False
+        self._content = content
+        self._chat_id = chat_id
+        self._response = None
+        self._event = asyncio.Event()
 
-    @abstractmethod
     async def start(self) -> None:
-        pass
+        self._running = True
+        if self._content:
+            await self._handle_message(sender_id="user", chat_id=self._chat_id, content=self._content)
+            try:
+                await asyncio.wait_for(self._event.wait(), timeout=300)
+            except asyncio.TimeoutError:
+                pass
+            self._running = False
+        await self._dispatch_outbound()
 
-    @abstractmethod
     async def stop(self) -> None:
-        pass
+        self._running = False
+        self._event.set()
 
-    @abstractmethod
-    async def send(self, msg: OutboundMessage) -> None:
-        pass
+    async def send(self, msg):
+        if not msg.metadata.get("_progress"):
+            print(msg.content)
+            self._event.set()
+
+    async def _dispatch_outbound(self) -> None:
+        while self._running:
+            try:
+                msg = await asyncio.wait_for(self.bus.outbound.get(), timeout=self._dispatch_timeout)
+                await self.send(msg)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
 
     def is_allowed(self, sender_id: str) -> bool:
         allow_list = getattr(self.config, "allow_from", [])
