@@ -250,8 +250,7 @@ class AgentLoop:
 
         async def _do_restart():
             await asyncio.sleep(1)
-            # Use -m tinyagent instead of sys.argv[0] for Windows compatibility
-            # (sys.argv[0] may be just "tinyagent" without full path on Windows)
+            os.environ["TINYAGENT_RESTART"] = f"{msg.channel}:{msg.chat_id}"
             os.execv(sys.executable, [sys.executable, "-m", "tinyagent"] + sys.argv[1:])
 
         asyncio.create_task(_do_restart())

@@ -332,6 +332,9 @@ class FeishuChannel(BaseChannel):
         # Start outbound message dispatcher
         self._outbound_task = asyncio.create_task(self._dispatch_outbound())
 
+        # Send startup message if restarted
+        await self._send_startup_message()
+
         while self._running:
             await asyncio.sleep(1)
 
@@ -377,6 +380,22 @@ class FeishuChannel(BaseChannel):
                 pass
 
         logger.info("Feishu bot stopped")
+
+    async def _send_startup_message(self) -> None:
+        restart_info = os.environ.get("TINYAGENT_RESTART")
+        if not restart_info:
+            return
+        try:
+            channel, chat_id = restart_info.split(":", 1)
+            if channel == "feishu":
+                await self.bus.outbound.put(OutboundMessage(
+                    channel="feishu",
+                    chat_id=chat_id,
+                    content="🔄 Bot restarted and ready.",
+                ))
+            del os.environ["TINYAGENT_RESTART"]
+        except Exception:
+            pass
 
     def _is_bot_mentioned(self, message: Any) -> bool:
         raw_content = message.content or ""
