@@ -9,6 +9,7 @@ from prompt_toolkit.keys import Keys
 from rich.console import Console
 from rich.markdown import Markdown
 
+from tinyagent import __logo__
 from tinyagent.bus import MessageBus, OutboundMessage
 from tinyagent.channel_base import BaseChannel
 
@@ -32,7 +33,7 @@ class TerminalChannel(BaseChannel):
     async def start(self) -> None:
         self._running = True
         self._current_response = None
-        self.console.print("[dim]Terminal channel started. Press Ctrl+C to exit.[/dim]")
+        self.console.print(f"{__logo__} Terminal chat started. Press Ctrl+C to exit.")
         self.console.print()
 
         outbound_task = asyncio.create_task(self._dispatch_outbound())
@@ -40,7 +41,7 @@ class TerminalChannel(BaseChannel):
         while self._running and not self._stop_requested:
             try:
                 user_input = await self._session.prompt_async(
-                    "> ",
+                    "\033[36mYou>\033[0m ",
                     key_bindings=self._bindings,
                 )
                 user_input = user_input.strip()
@@ -88,7 +89,7 @@ class TerminalChannel(BaseChannel):
         sys.stdout.write("\r" + " " * 20 + "\r")
         sys.stdout.flush()
         if self._current_response:
-            print(f"\033[32m>\033[0m {self._current_response}")
+            print(f"\033[32m{__logo__}>\033[0m {self._current_response}")
             print()
 
     async def _dispatch_outbound(self) -> None:
