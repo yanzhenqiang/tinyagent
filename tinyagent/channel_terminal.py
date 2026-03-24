@@ -1,4 +1,6 @@
 import asyncio
+import itertools
+import sys
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -21,6 +23,7 @@ class TerminalChannel(BaseChannel):
         self._session = PromptSession()
         self._bindings = KeyBindings()
         self._stop_requested = False
+        self._response_event = asyncio.Event()
 
         @self._bindings.add(Keys.ControlC)
         def _(event):
@@ -28,6 +31,7 @@ class TerminalChannel(BaseChannel):
 
     async def start(self) -> None:
         self._running = True
+        self._current_response = None
         self.console.print("[dim]Terminal channel started. Press Ctrl+C to exit.[/dim]")
         self.console.print()
 
@@ -47,11 +51,16 @@ class TerminalChannel(BaseChannel):
                     self._stop_requested = True
                     break
 
+                self._response_event.clear()
+                self._current_response = None
+
                 await self._handle_message(
                     sender_id="user",
                     chat_id="terminal",
                     content=user_input,
                 )
+
+                await self._show_spinner_until_response()
 
             except KeyboardInterrupt:
                 self._stop_requested = True
@@ -66,6 +75,21 @@ class TerminalChannel(BaseChannel):
             await outbound_task
         except asyncio.CancelledError:
             pass
+
+    async def _show_spinner_until_response(self) -> None:
+        spinner = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+        while not self._response_event.is_set():
+            sys.stdout.write(f"\r\033[2m{next(spinner)} Thinking...\033[0m")
+            sys.stdout.flush()
+            try:
+                await asyncio.wait_for(self._response_event.wait(), timeout=0.1)
+            except asyncio.TimeoutError:
+                continue
+        sys.stdout.write("\r" + " " * 20 + "\r")
+        sys.stdout.flush()
+        if self._current_response:
+            print(f"\033[32m>\033[0m {self._current_response}")
+            print()
 
     async def _dispatch_outbound(self) -> None:
         while self._running:
@@ -90,5 +114,5 @@ class TerminalChannel(BaseChannel):
 
         content = msg.content
         if content:
-            self.console.print(Markdown(content))
-            self.console.print()
+            self._current_response = content
+            self._response_event.set()
