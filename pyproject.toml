@@ -45,7 +45,7 @@ dev = [
 ]
 
 [project.scripts]
-tinyagent = "tinyagent.cli.commands:app"
+tinyagent = "tinyagent.cli:app"
 
 [build-system]
 requires = ["hatchling"]
