@@ -1,16 +1,24 @@
 import asyncio
 from pathlib import Path
+
 import typer
 from rich.console import Console
+from typer.core import TyperGroup
 
 from tinyagent import __logo__
 from tinyagent.config import Config, get_workspace_path
 
+
+class NoOptionsGroup(TyperGroup):
+    def format_help(self, ctx, formatter):
+        self.format_usage(ctx, formatter)
+        self.format_commands(ctx, formatter)
+
 app = typer.Typer(
     name="tinyagent",
-    help="tinyagent",
     no_args_is_help=True,
     add_completion=False,
+    cls=NoOptionsGroup,
 )
 
 console = Console()

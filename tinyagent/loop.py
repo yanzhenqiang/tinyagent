@@ -260,7 +260,7 @@ class AgentLoop:
             try:
                 response = await self._process_message(msg)
                 if response is not None:
-                    await self.bus.publish_outbound(response)
+                    await self.bus.outbound.put(response)
                 elif msg.channel == "cli":
                     await self.bus.outbound.put(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
