@@ -9,10 +9,20 @@ from tinyagent import __logo__
 from tinyagent.config import Config, get_workspace_path
 
 
+def _setup_logging():
+    from loguru import logger
+    from tinyagent.config import get_logs_dir
+    log_dir = get_logs_dir()
+    logger.remove()
+    logger.add(log_dir / "tinyagent.log", rotation="1 day", retention="7 days")
+
+
 class NoOptionsGroup(TyperGroup):
     def format_help(self, ctx, formatter):
         self.format_usage(ctx, formatter)
         self.format_commands(ctx, formatter)
+
+_setup_logging()
 
 app = typer.Typer(
     name="tinyagent",
