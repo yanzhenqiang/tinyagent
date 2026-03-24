@@ -31,6 +31,8 @@ class TerminalChannel(BaseChannel):
         self.console.print("[dim]Terminal channel started. Press Ctrl+C to exit.[/dim]")
         self.console.print()
 
+        outbound_task = asyncio.create_task(self._dispatch_outbound())
+
         while self._running and not self._stop_requested:
             try:
                 user_input = await self._session.prompt_async(
@@ -58,6 +60,25 @@ class TerminalChannel(BaseChannel):
                 break
             except Exception as e:
                 self.console.print(f"[red]Error: {e}[/red]")
+
+        outbound_task.cancel()
+        try:
+            await outbound_task
+        except asyncio.CancelledError:
+            pass
+
+    async def _dispatch_outbound(self) -> None:
+        while self._running:
+            try:
+                msg = await asyncio.wait_for(self.bus.outbound.get(), timeout=1.0)
+                await self.send(msg)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                from loguru import logger
+                logger.exception("Error in terminal outbound dispatch")
 
     async def stop(self) -> None:
         self._running = False
