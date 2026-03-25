@@ -311,12 +311,28 @@ class LLMProvider:
             else:
                 anthropic_msg = {"role": msg["role"], "content": msg.get("content", "")}
                 if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                    anthropic_msg["tool_calls"] = msg["tool_calls"]
+                    # Convert OpenAI format tool_calls to Anthropic format
+                    tool_use_blocks = []
+                    for tc in msg["tool_calls"]:
+                        if isinstance(tc, dict):
+                            func = tc.get("function", {})
+                            tool_use_blocks.append({
+                                "type": "tool_use",
+                                "id": tc.get("id"),
+                                "name": func.get("name", ""),
+                                "input": json.loads(func.get("arguments", "{}")) if func.get("arguments") else {},
+                            })
+                    if tool_use_blocks:
+                        content = anthropic_msg.get("content")
+                        if content:
+                            anthropic_msg["content"] = [{"type": "text", "text": content}] + tool_use_blocks
+                        else:
+                            anthropic_msg["content"] = tool_use_blocks
                 if msg.get("role") == "tool":
                     anthropic_msg["role"] = "user"
                     tool_result = {
                         "type": "tool_result",
-                        "tool_use_id": msg.get("tool_call_id", ""),
+                        "tool_use_id": msg.get("tool_call_id"),
                         "content": msg.get("content", ""),
                     }
                     anthropic_msg["content"] = [tool_result]
