@@ -1,10 +1,59 @@
 import asyncio
+import importlib
 from abc import ABC
 from typing import Any
 
 from loguru import logger
 
 from tinyagent.bus import InboundMessage, MessageBus
+
+
+# Channel 类型到模块路径的映射
+CHANNEL_REGISTRY = {
+    "feishu": "tinyagent.channel_feishu:FeishuChannel",
+    "terminal": "tinyagent.channel_terminal:TerminalChannel",
+    "dummy": "tinyagent.channel_base:BaseChannel",
+}
+
+
+def create_channel(
+    channel_type: str,
+    config: Any,
+    bus: MessageBus,
+    content: str | None = None,
+    chat_id: str = "cli",
+    global_config: Any = None,
+) -> "BaseChannel":
+    """
+    Factory function to create channel instances by type.
+
+    Args:
+        channel_type: One of "feishu", "terminal", "dummy"
+        config: Channel configuration (dict or config object)
+        bus: MessageBus instance
+        content: Optional message content (for dummy channel)
+        chat_id: Chat session ID (for dummy channel)
+        global_config: Optional global channel config for settings like send_progress
+
+    Returns:
+        BaseChannel instance
+
+    Raises:
+        ValueError: If channel_type is not supported
+    """
+    if channel_type not in CHANNEL_REGISTRY:
+        raise ValueError(f"Unknown channel type: {channel_type}. "
+                        f"Supported types: {list(CHANNEL_REGISTRY.keys())}")
+
+    module_path, class_name = CHANNEL_REGISTRY[channel_type].rsplit(":", 1)
+    module = importlib.import_module(module_path)
+    channel_class = getattr(module, class_name)
+
+    if channel_type == "dummy":
+        return channel_class(config, bus, content, chat_id)
+    elif channel_type == "feishu":
+        return channel_class(config, bus, global_config)
+    return channel_class(config, bus)
 
 
 class BaseChannel(ABC):

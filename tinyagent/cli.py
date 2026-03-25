@@ -1,6 +1,5 @@
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
 
 import typer
 from rich.console import Console
@@ -104,49 +103,96 @@ async def _run_agent_loop(agent, channel, error_msg: str | None = None):
         await agent.stop()
 
 
-@app.command("gateway", help="Start gateway server.")
+def _resolve_channel_config(cfg: Config, channel: str):
+    """
+    Resolve channel type and config from channel name.
+
+    Returns: (channel_type, channel_config, global_channel_config)
+    """
+    from types import SimpleNamespace
+    from tinyagent.config import ChannelInstanceConfig
+
+    # Check if it's an instance name in config
+    if channel in cfg.channel.instances:
+        instance_cfg = cfg.channel.instances[channel]
+        if not isinstance(instance_cfg, ChannelInstanceConfig):
+            instance_cfg = ChannelInstanceConfig.model_validate(instance_cfg)
+        return instance_cfg.type, instance_cfg.config, cfg.channel
+
+    # Otherwise treat as built-in type
+    if channel == "terminal":
+        return "terminal", SimpleNamespace(allow_from=["*"]), cfg.channel
+    elif channel == "feishu":
+        # For backward compatibility, use legacy feishu config
+        return "feishu", cfg.channel.feishu if hasattr(cfg.channel, "feishu") else {}, cfg.channel
+    elif channel == "dummy":
+        return "dummy", SimpleNamespace(allow_from=["*"]), cfg.channel
+    else:
+        raise ValueError(f"Unknown channel: {channel}")
+
+
+@app.command("run", help="Run agent with specified channel.")
+def run(
+    channel: str = typer.Option("terminal", "--channel", "-ch", help="Channel type or instance name (feishu, terminal, dummy)"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    logs: bool = typer.Option(False, "--logs", help="Show logs in terminal"),
+    message: str | None = typer.Option(None, "--message", "-m", help="Single message mode (for dummy channel)"),
+    chat_id: str = typer.Option("cli", "--chat-id", help="Chat session ID (for dummy channel)"),
+):
+    """Run the agent with the specified channel."""
+    if logs:
+        _setup_logging(stderr=True)
+    from tinyagent.agent import Agent
+    from tinyagent.channel_base import create_channel
+
+    cfg = _load_config(config)
+    ws_path = _init_workspace(cfg, workspace)
+    cfg.agent.workspace = str(ws_path)
+
+    channel_type, channel_cfg, global_cfg = _resolve_channel_config(cfg, channel)
+    enable_cron = message is None  # Disable cron for single message mode
+    agent = Agent(cfg, ws_path, enable_cron=enable_cron)
+
+    ch = create_channel(
+        channel_type=channel_type,
+        config=channel_cfg,
+        bus=agent.bus,
+        content=message,
+        chat_id=chat_id,
+        global_config=global_cfg,
+    )
+
+    error_msg = f"Channel '{channel}' crashed unexpectedly" if channel_type == "feishu" else None
+    try:
+        asyncio.run(_run_agent_loop(agent, ch, error_msg))
+    except KeyboardInterrupt:
+        console.print("\nShutting down...")
+
+
+@app.command("gateway", help="[Deprecated] Start gateway server. Use 'run --channel feishu' instead.")
 def gateway(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     logs: bool = typer.Option(False, "--logs", help="Show logs in terminal"),
 ):
-    if logs:
-        _setup_logging(stderr=True)
-    from tinyagent.agent import Agent
-    from tinyagent.channel_feishu import FeishuChannel
-
-    cfg = _load_config(config)
-    ws_path = _init_workspace(cfg, workspace)
-    cfg.agent.workspace = str(ws_path)
-    agent = Agent(cfg, ws_path)
-    channel = FeishuChannel(cfg.channel.feishu, agent.bus, cfg.channel)
-
-    try:
-        asyncio.run(_run_agent_loop(agent, channel, "Gateway crashed unexpectedly"))
-    except KeyboardInterrupt:
-        console.print("\nShutting down...")
+    """Deprecated: Use 'tinyagent run --channel feishu' instead."""
+    console.print("[yellow]Warning: 'gateway' command is deprecated. Use 'tinyagent run --channel feishu' instead.[/yellow]")
+    run(channel="feishu", workspace=workspace, config=config, logs=logs)
 
 
-@app.command("chat", help="Interactive chat mode.")
+@app.command("chat", help="[Deprecated] Interactive chat mode. Use 'run --channel terminal' instead.")
 def chat(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     logs: bool = typer.Option(False, "--logs", help="Show logs in terminal"),
 ):
-    if logs:
-        _setup_logging(stderr=True)
-    from tinyagent.agent import Agent
-    from tinyagent.channel_terminal import TerminalChannel
-
-    cfg = _load_config(config)
-    ws_path = _init_workspace(cfg, workspace)
-    cfg.agent.workspace = str(ws_path)
-    agent = Agent(cfg, ws_path)
-    channel = TerminalChannel(SimpleNamespace(allow_from=["*"]), agent.bus)
-    asyncio.run(_run_agent_loop(agent, channel))
+    """Deprecated: Use 'tinyagent run --channel terminal' instead."""
+    console.print("[yellow]Warning: 'chat' command is deprecated. Use 'tinyagent run --channel terminal' instead.[/yellow]")
+    run(channel="terminal", workspace=workspace, config=config, logs=logs)
 
 
-@app.command("message", help="Send a single message.")
+@app.command("message", help="[Deprecated] Send a single message. Use 'run --channel dummy --message MSG' instead.")
 def message(
     content: str = typer.Argument(..., help="Message to send"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
@@ -154,16 +200,9 @@ def message(
     chat_id: str = typer.Option("cli", "--chat-id", help="Chat session ID"),
     logs: bool = typer.Option(False, "--logs", help="Show logs in terminal"),
 ):
-    if logs:
-        _setup_logging(stderr=True)
-    from tinyagent.agent import Agent
-    from tinyagent.channel_base import BaseChannel
-
-    cfg = _load_config(config)
-    ws_path = _init_workspace(cfg, workspace)
-    agent = Agent(cfg, ws_path, enable_cron=False)
-    channel = BaseChannel(SimpleNamespace(allow_from=["*"]), agent.bus, content, chat_id)
-    asyncio.run(_run_agent_loop(agent, channel))
+    """Deprecated: Use 'tinyagent run --channel dummy --message MSG' instead."""
+    console.print("[yellow]Warning: 'message' command is deprecated. Use 'tinyagent run --channel dummy --message MSG' instead.[/yellow]")
+    run(channel="dummy", workspace=workspace, config=config, logs=logs, message=content, chat_id=chat_id)
 
 
 if __name__ == "__main__":

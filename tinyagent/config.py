@@ -11,11 +11,18 @@ class Base(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
+class ChannelInstanceConfig(Base):
+    enabled: bool = False
+    type: str = ""  # "feishu", "terminal", "dummy"
+    config: dict = Field(default_factory=dict)
+
+
 class ChannelConfig(Base):
     model_config = ConfigDict(extra="allow")
 
     send_progress: bool = True
     send_tool_hints: bool = False
+    instances: dict[str, ChannelInstanceConfig] = Field(default_factory=dict)
 
 
 class AgentConfig(Base):
