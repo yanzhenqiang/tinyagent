@@ -164,17 +164,5 @@ def message(
     asyncio.run(_run_agent_loop(agent, channel))
 
 
-@app.command("status", help="Show status.")
-def status():
-    from tinyagent.agent import Agent
-    from tinyagent.channel_base import BaseChannel
-
-    cfg = _load_config(None)
-    ws_path = _init_workspace(cfg, None)
-    agent = Agent(cfg, ws_path, enable_cron=False)
-    channel = BaseChannel(SimpleNamespace(allow_from=["*"]), agent.bus, "/status", "cli")
-    asyncio.run(_run_agent_loop(agent, channel))
-
-
 if __name__ == "__main__":
     app()

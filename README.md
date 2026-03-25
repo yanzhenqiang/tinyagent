@@ -5,7 +5,6 @@
 | `tinyagent chat` | Interactive chat mode |
 | `tinyagent message “xxxx”` | One message Mode |
 | `tinyagent gateway` | Start the gateway |
-| `tinyagent status` | Show status |
 
 ## Create a Feishu bot
 - Visit [Feishu Open Platform](https://open.feishu.cn/app)
