@@ -1,4 +1,5 @@
 import asyncio
+import os
 from pathlib import Path
 
 from loguru import logger
@@ -9,6 +10,24 @@ from tinyagent.cron_service import CronService
 from tinyagent.loop import AgentLoop
 from tinyagent.provider import GenerationSettings, LLMProvider
 from tinyagent.session import SessionManager
+
+
+HEARTBEAT = "HEARTBEAT"
+GUARD_PROC = "tinyagent_guard"
+
+
+def _guard_running() -> bool:
+    import subprocess
+    r = subprocess.run(["pgrep", "-f", GUARD_PROC], capture_output=True)
+    return r.returncode == 0 and r.stdout.strip()
+
+
+async def _heartbeat_task(workspace: str):
+    while True:
+        heartbeat_file = os.path.join(workspace, HEARTBEAT)
+        with open(heartbeat_file, "a"):
+            os.utime(heartbeat_file, None)
+        await asyncio.sleep(5)
 
 
 class Agent:
@@ -71,15 +90,17 @@ class Agent:
         self._tasks: list[asyncio.Task] = []
 
     async def start(self) -> None:
-        """Start the agent loop."""
         if self._running:
             return
         self._running = True
 
+        if _guard_running():
+            self._tasks.append(asyncio.create_task(_heartbeat_task(str(self.workspace))))
+            logger.info("Guard heartbeat enabled")
+
         if self.cron:
             await self.cron.start()
 
-        # Start agent loop in background
         self._tasks.append(asyncio.create_task(self.loop.run()))
         logger.info("Agent started")
 

@@ -1,4 +1,5 @@
 import asyncio
+import os
 import shutil
 import traceback
 from importlib.resources import files
@@ -162,17 +163,26 @@ def gateway(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     chat_id: str = typer.Option("gateway", "--chat-id", help="Chat session ID"),
     logs: bool = typer.Option(False, "--logs", help="Show logs in terminal"),
+    guard: bool = typer.Option(False, "--guard", help="Enable guard mode (auto-restart on crash)"),
+    code_path: str | None = typer.Option(None, "--code-path", help="Code path for git rollback (guard mode only)"),
 ):
-    _run_agent(
-        channel="feishu",
-        workspace=workspace,
-        config=config,
-        logs=logs,
-        content=None,
-        chat_id=chat_id,
-        enable_cron=True,
-        error_msg="Gateway crashed unexpectedly",
-    )
+    if guard:
+        from tinyagent.tinyagent_guard import main as guard_main
+        from tinyagent.config import get_workspace_path
+        ws = str(workspace) if workspace else str(get_workspace_path())
+        cp = code_path if code_path else os.getcwd()
+        guard_main(ws, cp)
+    else:
+        _run_agent(
+            channel="feishu",
+            workspace=workspace,
+            config=config,
+            logs=logs,
+            content=None,
+            chat_id=chat_id,
+            enable_cron=True,
+            error_msg="Gateway crashed unexpectedly",
+        )
 
 
 @app.command("chat", help="Interactive chat mode.")
