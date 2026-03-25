@@ -1,21 +1,35 @@
 import asyncio
+import shutil
+import traceback
+from importlib.resources import files
 from pathlib import Path
+from types import SimpleNamespace
 
 import typer
+from loguru import logger
 from rich.console import Console
 from typer.core import TyperGroup
 
-from tinyagent import __logo__
-from tinyagent.config import Config, get_workspace_path
+from tinyagent.agent import Agent
+from tinyagent.channel_base import create_channel
+from tinyagent.config import (
+    ChannelInstanceConfig,
+    Config,
+    get_config_path,
+    get_logs_dir,
+    get_workspace_path,
+    load_config,
+    save_config,
+    set_config_path,
+)
 
 
 def _setup_logging(stderr=False):
-    from loguru import logger
-
-    from tinyagent.config import get_logs_dir
     log_dir = get_logs_dir()
     logger.remove()
     logger.add(log_dir / "tinyagent.log", rotation="1 day", retention="7 days")
+    # Always output ERROR level and above to stderr
+    logger.add(lambda msg: print(msg, end=""), level="ERROR")
     if stderr:
         logger.add(lambda msg: print(msg, end=""), filter=lambda rec: rec["level"].name != "DEBUG")
 
@@ -24,6 +38,7 @@ class NoOptionsGroup(TyperGroup):
     def format_help(self, ctx, formatter):
         self.format_usage(ctx, formatter)
         self.format_commands(ctx, formatter)
+
 
 _setup_logging()
 
@@ -38,19 +53,10 @@ console = Console()
 
 
 def _load_config(config_path: str | None) -> Config:
-    from loguru import logger
-
-    from tinyagent.config import (
-        get_config_path,
-        load_config,
-        save_config,
-        set_config_path,
-    )
-
     if config_path:
         path = Path(config_path).expanduser().resolve()
         if not path.exists():
-            console.print(f"[red]Error: Config file not found: {path}[/red]")
+            logger.error("Config file not found: {}", path)
             raise typer.Exit(1)
         set_config_path(path)
         logger.info("Using config: {}", path)
@@ -65,7 +71,6 @@ def _load_config(config_path: str | None) -> Config:
 
 
 def _init_workspace(config: Config, workspace: str | None) -> Path:
-    from loguru import logger
     if workspace:
         config.agent.workspace = workspace
         ws_path = Path(workspace).expanduser()
@@ -75,8 +80,6 @@ def _init_workspace(config: Config, workspace: str | None) -> Path:
     if not ws_path.exists():
         ws_path.mkdir(parents=True, exist_ok=True)
         logger.info("Created workspace at {}", ws_path)
-        import shutil
-        from importlib.resources import files
         templates = files("tinyagent") / "templates"
         if templates.exists():
             shutil.copytree(templates, ws_path, dirs_exist_ok=True)
@@ -94,9 +97,8 @@ async def _run_agent_loop(agent, channel, error_msg: str | None = None):
         pass
     except Exception:
         if error_msg:
-            import traceback
-            console.print(f"\n[red]Error: {error_msg}[/red]")
-            console.print(traceback.format_exc())
+            logger.error("Error: {}", error_msg)
+            logger.error(traceback.format_exc())
         raise
     finally:
         await channel.stop()
@@ -104,9 +106,6 @@ async def _run_agent_loop(agent, channel, error_msg: str | None = None):
 
 
 def _resolve_channel_config(cfg: Config, channel: str):
-    from types import SimpleNamespace
-
-    from tinyagent.config import ChannelInstanceConfig
     if channel in cfg.channel.instances:
         instance_cfg = cfg.channel.instances[channel]
         if not isinstance(instance_cfg, ChannelInstanceConfig):
@@ -134,8 +133,6 @@ def _run_agent(
 ):
     if logs:
         _setup_logging(stderr=True)
-    from tinyagent.agent import Agent
-    from tinyagent.channel_base import create_channel
 
     cfg = _load_config(config)
     ws_path = _init_workspace(cfg, workspace)
@@ -156,12 +153,11 @@ def _run_agent(
     try:
         asyncio.run(_run_agent_loop(agent, ch, error_msg))
     except KeyboardInterrupt:
-        console.print("\nShutting down...")
+        logger.info("Shutting down...")
 
 
 @app.command("gateway", help="Start gateway server.")
 def gateway(
-    init_content: str = typer.Argument(..., help="Message to send"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     chat_id: str = typer.Option("gateway", "--chat-id", help="Chat session ID"),
@@ -172,7 +168,7 @@ def gateway(
         workspace=workspace,
         config=config,
         logs=logs,
-        content=init_content,
+        content=None,
         chat_id=chat_id,
         enable_cron=True,
         error_msg="Gateway crashed unexpectedly",
@@ -181,7 +177,6 @@ def gateway(
 
 @app.command("chat", help="Interactive chat mode.")
 def chat(
-    init_content: str = typer.Argument(..., help="Message to send"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     chat_id: str = typer.Option("chat", "--chat-id", help="Chat session ID"),
@@ -192,7 +187,7 @@ def chat(
         workspace=workspace,
         config=config,
         logs=logs,
-        content=init_content,
+        content=None,
         chat_id=chat_id,
         enable_cron=True,
     )
@@ -200,7 +195,7 @@ def chat(
 
 @app.command("message", help="Send a single message.")
 def message(
-    init_content: str = typer.Argument(..., help="Message to send"),
+    content: str = typer.Argument(..., help="Message to send"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     chat_id: str = typer.Option("message", "--chat-id", help="Chat session ID"),
@@ -211,7 +206,7 @@ def message(
         workspace=workspace,
         config=config,
         logs=logs,
-        content=init_content,
+        content=content,
         chat_id=chat_id,
         enable_cron=False,
     )

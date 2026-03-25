@@ -5,6 +5,7 @@ import os
 import re
 import sys
 from contextlib import AsyncExitStack
+from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -15,7 +16,8 @@ from tinyagent.config import ChannelConfig, ExecToolConfig, WebSearchConfig
 from tinyagent.context import ContextBuilder
 from tinyagent.cron_service import CronService
 from tinyagent.memory import MemoryConsolidator
-from tinyagent.provider import LLMProvider
+from tinyagent.provider import LLMProvider, PROVIDERS
+from tinyagent.tools.mcp import connect_mcp_servers
 from tinyagent.session import Session, SessionManager
 from tinyagent.tools.cron import CronTool
 from tinyagent.tools.message import MessageTool
@@ -99,7 +101,6 @@ class AgentLoop:
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
             return
         self._mcp_connecting = True
-        from tinyagent.agent.tools.mcp import connect_mcp_servers
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
@@ -258,7 +259,6 @@ class AgentLoop:
         asyncio.create_task(_do_restart())
 
     async def _handle_status(self, msg: InboundMessage) -> None:
-        from tinyagent.provider import PROVIDERS
         lines = ["🐍 tinyagent Status\n"]
         lines.append(f"Model: {self.model}")
         for spec in PROVIDERS:
@@ -423,7 +423,6 @@ class AgentLoop:
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
-        from datetime import datetime
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")

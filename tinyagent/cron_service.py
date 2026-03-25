@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from loguru import logger
 
+from tinyagent.bus import InboundMessage
+
 
 @dataclass
 class CronSchedule:
@@ -285,7 +287,6 @@ class CronService:
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
 
         try:
-            from tinyagent.bus import InboundMessage
             if self._bus is None:
                 raise RuntimeError("CronService: bus not set, cannot publish message")
             await self._bus.inbound.put(InboundMessage(

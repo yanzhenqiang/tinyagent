@@ -156,14 +156,6 @@ def _extract_element_content(element: dict) -> list[str]:
 
 
 def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
-    """Extract text and image keys from Feishu post (rich text) message.
-
-    Handles three payload shapes:
-    - Direct:    {"title": "...", "content": [[...]]}
-    - Localized: {"zh_cn": {"title": "...", "content": [...]}}
-    - Wrapped:   {"post": {"zh_cn": {"title": "...", "content": [...]}}}
-    """
-
     def _parse_block(block: dict) -> tuple[str | None, list[str]]:
         if not isinstance(block, dict) or not isinstance(block.get("content"), list):
             return None, []
@@ -305,7 +297,6 @@ class FeishuChannel(BaseChannel):
             log_level=lark.LogLevel.INFO
         )
 
-        # Start WebSocket client in a separate thread with reconnect loop.
         def run_ws():
             import time
 
@@ -548,13 +539,6 @@ class FeishuChannel(BaseChannel):
 
     @classmethod
     def _detect_msg_format(cls, content: str) -> str:
-        """Determine the optimal Feishu message format for *content*.
-
-        Returns one of:
-        - ``"text"``        – plain text, short and no markdown
-        - ``"post"``        – rich text (links only, moderate length)
-        - ``"interactive"`` – card with full markdown rendering
-        """
         stripped = content.strip()
 
         # Complex markdown (code blocks, tables, headings) → always card
@@ -689,7 +673,6 @@ class FeishuChannel(BaseChannel):
             return None
 
     def _download_image_sync(self, message_id: str, image_key: str) -> tuple[bytes | None, str | None]:
-        """Download an image from Feishu message by message_id and image_key."""
         from lark_oapi.api.im.v1 import GetMessageResourceRequest
         try:
             request = GetMessageResourceRequest.builder() \
@@ -714,7 +697,6 @@ class FeishuChannel(BaseChannel):
     def _download_file_sync(
         self, message_id: str, file_key: str, resource_type: str = "file"
     ) -> tuple[bytes | None, str | None]:
-        """Download a file/audio/media from a Feishu message by message_id and file_key."""
         from lark_oapi.api.im.v1 import GetMessageResourceRequest
 
         # Feishu API only accepts 'image' or 'file' as type parameter

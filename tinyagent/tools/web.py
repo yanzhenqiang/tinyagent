@@ -74,8 +74,6 @@ class WebSearchTool(Tool):
     }
 
     def __init__(self, config: WebSearchConfig | None = None, proxy: str | None = None):
-        from tinyagent.config import WebSearchConfig
-
         self.config = config if config is not None else WebSearchConfig()
         self.proxy = proxy
 

@@ -3,6 +3,7 @@ import itertools
 import sys
 from typing import Any
 
+from loguru import logger
 from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
@@ -65,7 +66,7 @@ class TerminalChannel(BaseChannel):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                self.console.print(f"[red]Error: {e}[/red]")
+                logger.error("Error: {}", e)
 
         outbound_task.cancel()
         try:

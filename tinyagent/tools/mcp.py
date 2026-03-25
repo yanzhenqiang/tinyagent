@@ -4,9 +4,8 @@ from typing import Any
 
 import httpx
 from loguru import logger
-from tinyagent.agent.tools.registry import ToolRegistry
-
 from tinyagent.tools.base import Tool
+from tinyagent.tools.registry import ToolRegistry
 
 
 class MCPToolWrapper(Tool):

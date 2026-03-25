@@ -3,8 +3,8 @@ from pathlib import Path
 
 from loguru import logger
 
-from tinyagent.bus import MessageBus
-from tinyagent.config import Config
+from tinyagent.bus import InboundMessage, MessageBus
+from tinyagent.config import Config, get_cron_dir
 from tinyagent.cron_service import CronService
 from tinyagent.loop import AgentLoop
 from tinyagent.provider import GenerationSettings, LLMProvider
@@ -47,7 +47,6 @@ class Agent:
         # Initialize cron service if enabled
         self.cron: CronService | None = None
         if enable_cron:
-            from tinyagent.config import get_cron_dir
             cron_store_path = get_cron_dir() / "jobs.json"
             self.cron = CronService(cron_store_path, bus=self.bus)
 
@@ -114,8 +113,6 @@ class Agent:
         session_key: str | None = None,
     ) -> str | None:
         """Process a single message and return the response directly."""
-        from tinyagent.bus import InboundMessage
-
         msg = InboundMessage(
             channel=channel,
             sender_id=sender_id,
