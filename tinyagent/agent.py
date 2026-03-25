@@ -1,11 +1,10 @@
 import asyncio
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 
 from tinyagent.bus import MessageBus
-from tinyagent.config import ChannelConfig, Config, ExecToolConfig, WebSearchConfig
+from tinyagent.config import Config
 from tinyagent.cron_service import CronService
 from tinyagent.loop import AgentLoop
 from tinyagent.provider import GenerationSettings, LLMProvider

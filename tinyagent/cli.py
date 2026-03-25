@@ -12,6 +12,7 @@ from tinyagent.config import Config, get_workspace_path
 
 def _setup_logging(stderr=False):
     from loguru import logger
+
     from tinyagent.config import get_logs_dir
     log_dir = get_logs_dir()
     logger.remove()
@@ -39,6 +40,7 @@ console = Console()
 
 def _load_config(config_path: str | None) -> Config:
     from loguru import logger
+
     from tinyagent.config import (
         get_config_path,
         load_config,

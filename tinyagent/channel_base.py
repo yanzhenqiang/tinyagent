@@ -1,10 +1,10 @@
 import asyncio
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Any
 
 from loguru import logger
 
-from tinyagent.bus import InboundMessage, MessageBus, OutboundMessage
+from tinyagent.bus import InboundMessage, MessageBus
 
 
 class BaseChannel(ABC):
