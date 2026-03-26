@@ -7,7 +7,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from tinyagent.bus import InboundMessage, MessageBus
+from tinyagent.bus import MessageBus
 from tinyagent.config import Config, get_cron_dir
 from tinyagent.cron_service import CronService
 from tinyagent.loop import AgentLoop
@@ -137,24 +137,3 @@ class Agent:
         self.loop.stop()
         await self.loop.close_mcp()
         logger.info("Agent stopped")
-
-    async def process_message(
-        self,
-        content: str,
-        channel: str = "cli",
-        chat_id: str = "default",
-        sender_id: str = "user",
-        session_key: str | None = None,
-    ) -> str | None:
-        """Process a single message and return the response directly."""
-        msg = InboundMessage(
-            channel=channel,
-            sender_id=sender_id,
-            chat_id=chat_id,
-            content=content,
-            session_key_override=session_key or f"{channel}:{chat_id}",
-        )
-
-        # Use the loop's _process_message directly
-        response = await self.loop._process_message(msg)
-        return response.content if response else None
