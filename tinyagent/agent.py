@@ -1,8 +1,5 @@
 import asyncio
 import os
-import sys
-import traceback
-from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
@@ -13,23 +10,6 @@ from tinyagent.cron_service import CronService
 from tinyagent.loop import AgentLoop
 from tinyagent.provider import LLMProvider
 from tinyagent.session import SessionManager
-
-
-def write_crash(workspace: Path, exc_type, exc_val, exc_tb) -> None:
-    if issubclass(exc_type, (KeyboardInterrupt, SystemExit)):
-        return
-    crash_info = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    crash_file = workspace / f"crash_{ts}.log"
-    crash_file.write_text(f"Crash at {datetime.now().isoformat()}\n\n{crash_info}")
-    sys.exit(1)
-
-
-def _make_crash_handler(workspace: Path):
-    """Create sys.excepthook that writes crash log."""
-    def crash_handler(exc_type, exc_val, exc_tb):
-        write_crash(workspace, exc_type, exc_val, exc_tb)
-    return crash_handler
 
 
 async def _heartbeat_task(workspace: str):
@@ -48,8 +28,7 @@ class Agent:
         enable_cron: bool = True,
     ):
         self.config = config
-        self.workspace = workspace or config.workspace_path
-        self.workspace.mkdir(parents=True, exist_ok=True)
+        self.workspace = workspace
         self.bus = MessageBus()
         model = config.agent.model
         provider_name = config.agent.provider

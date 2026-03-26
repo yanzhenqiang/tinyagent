@@ -272,7 +272,7 @@ class AgentLoop:
 
     def _handle_exception(self, _loop, context):
         """Global exception handler for asyncio."""
-        from tinyagent.agent import write_crash
+        from tinyagent.cli import write_crash
         exception = context.get("exception")
         if exception:
             write_crash(self.workspace, type(exception), exception, exception.__traceback__)

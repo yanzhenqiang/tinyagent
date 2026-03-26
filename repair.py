@@ -2,6 +2,7 @@
 """
 Standalone crash repair agent.
 Minimal dependencies, self-contained.
+Only write log, not raise exception
 """
 import os
 import subprocess
