@@ -200,8 +200,15 @@ def _run_agent(
 
 def _guard_running() -> bool:
     import subprocess
-    r = subprocess.run(["pgrep", "-f", "gateway.*--guard"], capture_output=True)
-    return r.returncode == 0 and r.stdout.strip()
+    import os
+    my_pid = os.getpid()
+    r = subprocess.run(["pgrep", "-f", "tinyagent_guard"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return False
+    for pid_str in r.stdout.strip().split("\n"):
+        if pid_str and int(pid_str) != my_pid:
+            return True
+    return False
 
 
 @app.command("gateway", help="Start gateway server.")
@@ -214,22 +221,24 @@ def gateway(
     code_path: str | None = typer.Option(None, "--code-path", help="Code path for git rollback (guard mode only)"),
 ):
     if guard and not _guard_running():
-        from tinyagent.tinyagent_guard import main as guard_main
+        import subprocess
+        import sys
+
         from tinyagent.config import get_workspace_path
         ws = str(workspace) if workspace else str(get_workspace_path())
         cp = code_path if code_path else os.getcwd()
-        guard_main(ws, cp)
-    else:
-        _run_agent(
-            channel="feishu",
-            workspace=workspace,
-            config=config,
-            logs=logs,
-            content=None,
-            chat_id=chat_id,
-            enable_cron=True,
-            error_msg="Gateway crashed unexpectedly",
-        )
+        cmd = [sys.executable, "-m", "tinyagent.tinyagent_guard", ws, cp]
+        subprocess.run(cmd)
+    _run_agent(
+        channel="feishu",
+        workspace=workspace,
+        config=config,
+        logs=logs,
+        content=None,
+        chat_id=chat_id,
+        enable_cron=True,
+        error_msg="Gateway crashed unexpectedly",
+    )
 
 
 @app.command("chat", help="Interactive chat mode.")
