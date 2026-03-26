@@ -35,17 +35,21 @@ def get_crash_file(workspace: Path) -> Path | None:
     return crash_files[-1]
 
 
-def _load_anthropic_config() -> tuple[str | None, str | None]:
+def _load_anthropic_config() -> tuple[str | None, str | None, str]:
     config_path = Path.home() / ".tinyagent" / "config.json"
     with open(config_path) as f:
         data = json.load(f)
     provider = data.get("provider", {})
     anthropic = provider.get("anthropic", {})
-    return anthropic.get("apiKey"), anthropic.get("apiBase")
+    agent = data.get("agent", {})
+    model = agent.get("model", "claude-opus-4-6")
+    if "/" in model:
+        model = model.split("/")[-1]
+    return anthropic.get("apiKey"), anthropic.get("apiBase"), model
 
 
 def _call_llm_repair(workspace: Path, code_path: Path, repair_log: Path) -> None:
-    api_key, api_base = _load_anthropic_config()
+    api_key, api_base, model = _load_anthropic_config()
     if not api_key:
         with open(repair_log, "a") as f:
             f.write("[SKIP] No API_KEY, skipping LLM repair\n")
@@ -96,7 +100,7 @@ Be minimal. Only fix the obvious bug. Do not refactor."""
     for turn in range(max_turns):
         try:
             response = client.messages.create(
-                model="claude-sonnet-4-6",
+                model=model,
                 system=system_prompt,
                 messages=messages,
                 max_tokens=4096,

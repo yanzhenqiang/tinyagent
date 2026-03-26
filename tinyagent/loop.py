@@ -17,7 +17,7 @@ from tinyagent.config import ChannelConfig, ExecToolConfig, WebSearchConfig
 from tinyagent.context import ContextBuilder
 from tinyagent.cron_service import CronService
 from tinyagent.memory import MemoryConsolidator
-from tinyagent.provider import PROVIDERS, LLMProvider
+from tinyagent.provider import LLMProvider
 from tinyagent.session import Session, SessionManager
 from tinyagent.tools.cron import CronTool
 from tinyagent.tools.mcp import connect_mcp_servers
@@ -147,12 +147,6 @@ class AgentLoop:
 
     async def _cmd_status(self, msg: InboundMessage) -> OutboundMessage:
         lines = ["🐍 tinyagent Status\n", f"Model: {self.model}"]
-        for spec in PROVIDERS:
-            p = getattr(self.provider.config if hasattr(self.provider, 'config') else self.provider, spec.name, None)
-            if p is None:
-                continue
-            has_key = bool(p.api_key if hasattr(p, 'api_key') else False)
-            lines.append(f"{spec.label}: {'✓' if has_key else 'not set'}")
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
 
     _COMMAND_HANDLERS = {
