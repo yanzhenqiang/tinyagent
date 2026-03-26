@@ -35,21 +35,21 @@ def get_crash_file(workspace: Path) -> Path | None:
     return crash_files[-1]
 
 
-def _load_anthropic_config() -> tuple[str | None, str | None, str]:
+def _load_provider_config() -> tuple[str | None, str | None, str]:
     config_path = Path.home() / ".tinyagent" / "config.json"
     with open(config_path) as f:
         data = json.load(f)
-    provider = data.get("provider", {})
-    anthropic = provider.get("anthropic", {})
     agent = data.get("agent", {})
+    provider_name = agent.get("provider", "anthropic")
+    provider_config = data.get("provider", {}).get(provider_name, {})
     model = agent.get("model", "claude-opus-4-6")
     if "/" in model:
         model = model.split("/")[-1]
-    return anthropic.get("apiKey"), anthropic.get("apiBase"), model
+    return provider_config.get("apiKey"), provider_config.get("apiBase"), model
 
 
 def _call_llm_repair(workspace: Path, code_path: Path, repair_log: Path) -> None:
-    api_key, api_base, model = _load_anthropic_config()
+    api_key, api_base, model = _load_provider_config()
     if not api_key:
         with open(repair_log, "a") as f:
             f.write("[SKIP] No API_KEY, skipping LLM repair\n")
