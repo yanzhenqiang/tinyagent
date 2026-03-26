@@ -65,3 +65,16 @@ workspace/
 | `tinyagent message "task"` | One-shot message mode |
 | `tinyagent gateway` | Start Feishu gateway |
 | `tinyagent gateway --guard` | Start Guard supervisor (production) |
+
+
+其实这个工程是一个状态机，没准用状态机更容易实现呢?
+其实可以写成一个agent loop别的啥也没有
+这个agent loop有两套promt
+一套修复的只有bash
+一套负责的
+如果有crash文件就加载crash的
+
+飞书这个进程也是agent loop启动的
+feishu在另外一个进程
+这样人写code就更少了
+这样guard只负责拉起agent loop就够了对吧

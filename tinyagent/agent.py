@@ -77,8 +77,16 @@ class Agent:
         self._tasks.append(asyncio.create_task(_heartbeat_task(str(self.workspace))))
         if self.cron:
             await self.cron.start()
-        self._tasks.append(asyncio.create_task(self.loop.run()))
+        loop_task = asyncio.create_task(self.loop.run())
+        loop_task.add_done_callback(self._on_loop_done)
+        self._tasks.append(loop_task)
         logger.info("Agent started")
+
+    def _on_loop_done(self, task):
+        if task.exception():
+            logger.error("Agent loop crashed: {}", task.exception())
+            import sys
+            sys.exit(1)
 
     async def stop(self) -> None:
         if not self._running:
