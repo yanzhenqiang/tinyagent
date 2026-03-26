@@ -38,7 +38,6 @@ class Agent:
             api_key=p.api_key if p else "",
             api_base=p.api_base if p else None,
             default_model=model,
-            provider_name=provider_name,
             temperature=config.agent.temperature,
             max_tokens=config.agent.max_tokens,
             reasoning_effort=config.agent.reasoning_effort,
