@@ -75,22 +75,18 @@ def _call_llm_repair(crash_content: str, workspace: Path, code_path: Path, repai
         client_kwargs["base_url"] = api_base
     client = Anthropic(**client_kwargs)
 
-    system_prompt = f"""You are a crash repair agent. Your task: analyze the crash and fix the code.
+    system_prompt = f"""You are a crash repair agent. Analyze the crash and fix the code.
 
-Available tool:
-- bash(cmd): execute shell command in the project directory ({code_path})
+Available tool: bash(cmd) to execute shell commands in {code_path}
 
-Workflow:
-1. Read crash log and related code files using bash("cat ...") or bash("head ...")
-2. Analyze the root cause
-3. Fix with bash("sed ...") or bash("echo ... > file")
-4. Verify fix with bash("python -m py_compile ...")
-5. When done, report what you fixed
+Your task:
+- Read the crash log and relevant source files
+- Identify the root cause
+- Make minimal fixes to resolve the crash
+- Verify the fix works
+- Report what you changed
 
-Constraints:
-- Fix only the obvious bug causing the crash
-- Do not refactor unrelated code
-- If you cannot fix it, report why"""
+Be minimal. Only fix the obvious bug. Do not refactor."""
 
     messages = [
         {"role": "user", "content": f"Fix this crash:\n\n```\n{crash_content}\n```"}
