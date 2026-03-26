@@ -125,25 +125,23 @@ CRASH_EXCEPTIONS = (
 
 async def _run_agent_loop(agent, channel, workspace: Path, error_msg: str | None = None):
     try:
-        await agent.start()
-        await channel.start()
-    except KeyboardInterrupt:
-        pass
+        async with agent:
+            await channel.start()
+            try:
+                await asyncio.Event().wait()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                await channel.stop()
     except Exception as e:
-        # Check if this is a code crash that needs repair
         if isinstance(e, EXPECTED_EXCEPTIONS):
-            raise  # No crash log for expected exceptions
-
-        # Write crash log for repair agent
+            raise
         crash_info = traceback.format_exc()
         _write_crash_log(Path(workspace), crash_info)
         if error_msg:
             logger.error("Error: {}", error_msg)
             logger.error(crash_info)
         raise
-    finally:
-        await channel.stop()
-        await agent.stop()
 
 
 def _run_agent(
