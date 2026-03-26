@@ -55,13 +55,10 @@ build-backend = "hatchling.build"
 [tool.hatch.metadata]
 allow-direct-references = true
 
-[tool.hatch.build]
-include = [
-    "tinyagent/**/*.py",
-    "tinyagent/templates/**/*.md",
-    "tinyagent/skills/**/*.md",
-    "tinyagent/skills/**/*.sh",
-]
+  [tool.hatch.build]                                                                                                                                       
+  include = [                                                                                                                                              
+      "tinyagent/**/*.{py, md,sh}",                                                                                                        
+  ] 
 
 [tool.hatch.build.targets.wheel]
 packages = ["tinyagent"]

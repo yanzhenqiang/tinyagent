@@ -16,10 +16,10 @@ from tinyagent.config import ChannelConfig, ExecToolConfig, WebSearchConfig
 from tinyagent.context import ContextBuilder
 from tinyagent.cron_service import CronService
 from tinyagent.memory import MemoryConsolidator
-from tinyagent.provider import LLMProvider, PROVIDERS
-from tinyagent.tools.mcp import connect_mcp_servers
+from tinyagent.provider import PROVIDERS, LLMProvider
 from tinyagent.session import Session, SessionManager
 from tinyagent.tools.cron import CronTool
+from tinyagent.tools.mcp import connect_mcp_servers
 from tinyagent.tools.message import MessageTool
 from tinyagent.tools.registry import ToolRegistry
 from tinyagent.tools.shell import ExecTool
@@ -69,7 +69,7 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
-        self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._active_tasks: dict[str, list[asyncio.Task]] = {}
         self._background_tasks: list[asyncio.Task] = []
         self._processing_lock = asyncio.Lock()
         self.memory_consolidator = MemoryConsolidator(
