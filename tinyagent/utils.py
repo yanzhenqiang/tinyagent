@@ -55,18 +55,21 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
 
 def build_assistant_message(
     content: str | None,
-    tool_calls: list[dict[str, Any]] | None = None,
+    tool_uses: list[dict[str, Any]] | None = None,
     reasoning_content: str | None = None,
     thinking_blocks: list[dict] | None = None,
 ) -> dict[str, Any]:
-    msg: dict[str, Any] = {"role": "assistant", "content": content}
-    if tool_calls:
-        msg["tool_calls"] = tool_calls
-    if reasoning_content is not None:
-        msg["reasoning_content"] = reasoning_content
+    # Anthropic format: content is list of blocks
+    blocks: list[dict] = []
+    if reasoning_content:
+        blocks.append({"type": "thinking", "thinking": reasoning_content})
     if thinking_blocks:
-        msg["thinking_blocks"] = thinking_blocks
-    return msg
+        blocks.extend(thinking_blocks)
+    if content:
+        blocks.append({"type": "text", "text": content})
+    if tool_uses:
+        blocks.extend(tool_uses)
+    return {"role": "assistant", "content": blocks or "..."}
 
 
 def estimate_message_tokens(message: dict[str, Any]) -> int:

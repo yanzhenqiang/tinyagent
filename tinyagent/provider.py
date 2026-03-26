@@ -19,20 +19,8 @@ class ToolCallRequest:
     provider_specific_fields: dict[str, Any] | None = None
     function_provider_specific_fields: dict[str, Any] | None = None
 
-    def to_openai_tool_call(self) -> dict[str, Any]:
-        tool_call = {
-            "id": self.id,
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "arguments": json.dumps(self.arguments, ensure_ascii=False),
-            },
-        }
-        if self.provider_specific_fields:
-            tool_call["provider_specific_fields"] = self.provider_specific_fields
-        if self.function_provider_specific_fields:
-            tool_call["function"]["provider_specific_fields"] = self.function_provider_specific_fields
-        return tool_call
+    def to_anthropic_format(self) -> dict[str, Any]:
+        return {"type": "tool_use", "id": self.id, "name": self.name, "input": self.arguments}
 
 
 @dataclass
@@ -298,34 +286,7 @@ class LLMProvider:
             if msg.get("role") == "system":
                 system = msg.get("content")
             else:
-                anthropic_msg = {"role": msg["role"], "content": msg.get("content", "")}
-                if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                    # Convert OpenAI format tool_calls to Anthropic format
-                    tool_use_blocks = []
-                    for tc in msg["tool_calls"]:
-                        if isinstance(tc, dict):
-                            func = tc.get("function", {})
-                            tool_use_blocks.append({
-                                "type": "tool_use",
-                                "id": tc.get("id"),
-                                "name": func.get("name", ""),
-                                "input": json.loads(func.get("arguments", "{}")) if func.get("arguments") else {},
-                            })
-                    if tool_use_blocks:
-                        content = anthropic_msg.get("content")
-                        if content:
-                            anthropic_msg["content"] = [{"type": "text", "text": content}] + tool_use_blocks
-                        else:
-                            anthropic_msg["content"] = tool_use_blocks
-                if msg.get("role") == "tool":
-                    anthropic_msg["role"] = "user"
-                    tool_result = {
-                        "type": "tool_result",
-                        "tool_use_id": msg.get("tool_call_id"),
-                        "content": msg.get("content", ""),
-                    }
-                    anthropic_msg["content"] = [tool_result]
-                anthropic_messages.append(anthropic_msg)
+                anthropic_messages.append({"role": msg["role"], "content": msg.get("content", "")})
         return system, anthropic_messages
 
     def _convert_tools(self, tools: list[dict[str, Any]] | None) -> list[dict] | None:

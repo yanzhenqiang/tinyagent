@@ -104,21 +104,25 @@ Your workspace is at: {workspace_path}
 
     def add_tool_result(
         self, messages: list[dict[str, Any]],
-        tool_call_id: str, tool_name: str, result: str,
+        tool_call_id: str, result: str,
     ) -> list[dict[str, Any]]:
-        messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
+        # Anthropic format: user message with tool_result content block
+        messages.append({
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": tool_call_id, "content": result}]
+        })
         return messages
 
     def add_assistant_message(
         self, messages: list[dict[str, Any]],
         content: str | None,
-        tool_calls: list[dict[str, Any]] | None = None,
+        tool_uses: list[dict[str, Any]] | None = None,
         reasoning_content: str | None = None,
         thinking_blocks: list[dict] | None = None,
     ) -> list[dict[str, Any]]:
         messages.append(build_assistant_message(
             content,
-            tool_calls=tool_calls,
+            tool_uses=tool_uses,
             reasoning_content=reasoning_content,
             thinking_blocks=thinking_blocks,
         ))
