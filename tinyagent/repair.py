@@ -7,14 +7,12 @@ import argparse
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 from anthropic import Anthropic
 
 
 def run_bash(cmd: str, timeout: int = 30, cwd: Path | None = None) -> str:
-    """Execute bash command, return output."""
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, timeout=timeout, cwd=cwd
@@ -31,65 +29,54 @@ def run_bash(cmd: str, timeout: int = 30, cwd: Path | None = None) -> str:
 
 
 def get_crash_file(workspace: Path) -> Path | None:
-    """Get fresh crash file (workspace/crash_*.log), None if no fresh crash."""
     crash_files = sorted(workspace.glob("crash_*.log"))
     if not crash_files:
         return None
-    return crash_files[-1]  # Most recent
-
-
-def archive_crash(crash_file: Path, workspace: Path) -> None:
-    """Move repaired crash to history."""
-    history_dir = workspace / "history_crash"
-    history_dir.mkdir(parents=True, exist_ok=True)
-    crash_file.rename(history_dir / crash_file.name)
+    return crash_files[-1]
 
 
 def _load_anthropic_config() -> tuple[str | None, str | None]:
-    """Load anthropic api_key and api_base from config."""
     config_path = Path.home() / ".tinyagent" / "config.json"
-    if config_path.exists():
-        try:
-            with open(config_path) as f:
-                data = json.load(f)
-            provider = data.get("provider", {})
-            anthropic = provider.get("anthropic", {})
-            return anthropic.get("apiKey"), anthropic.get("apiBase")
-        except Exception:
-            pass
-    return None, None
+    with open(config_path) as f:
+        data = json.load(f)
+    provider = data.get("provider", {})
+    anthropic = provider.get("anthropic", {})
+    return anthropic.get("apiKey"), anthropic.get("apiBase")
 
 
-def _call_llm_repair(crash_content: str, workspace: Path, code_path: Path, repair_log: Path) -> None:
-    """Call LLM with bash tool to analyze and fix crash."""
+def _call_llm_repair(workspace: Path, code_path: Path, repair_log: Path) -> None:
     api_key, api_base = _load_anthropic_config()
     if not api_key:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
         with open(repair_log, "a") as f:
-            f.write("[SKIP] No ANTHROPIC_API_KEY, skipping LLM repair\n")
+            f.write("[SKIP] No API_KEY, skipping LLM repair\n")
         return
-
     client_kwargs = {"api_key": api_key}
     if api_base:
         client_kwargs["base_url"] = api_base
     client = Anthropic(**client_kwargs)
-
     system_prompt = f"""You are a crash repair agent. Analyze the crash and fix the code.
 
-Available tool: bash(cmd) to execute shell commands in {code_path}
+Workspace: {workspace}
+Code path: {code_path}
+
+Crash files are in {workspace}/crash_*.log
+After fixing, move the crash file to {workspace}/history_crash/
+
+Available tool: bash(cmd) to execute shell commands.
 
 Your task:
-- Read the crash log and relevant source files
-- Identify the root cause
-- Make minimal fixes to resolve the crash
-- Verify the fix works
-- Report what you changed
+1. List crash files: ls {workspace}/crash_*.log
+2. Read the most recent crash log
+3. Read relevant source files
+4. Identify root cause and make minimal fixes
+5. Verify the fix works
+6. Move crash file to history_crash directory
+7. Report what you changed
 
 Be minimal. Only fix the obvious bug. Do not refactor."""
 
     messages = [
-        {"role": "user", "content": f"Fix this crash:\n\n```\n{crash_content}\n```"}
+        {"role": "user", "content": "Find and fix the crash. Start by listing crash files."}
     ]
 
     max_turns = 20
@@ -119,93 +106,55 @@ Be minimal. Only fix the obvious bug. Do not refactor."""
             with open(repair_log, "a") as f:
                 f.write(f"[ERROR] LLM API error: {e}\n")
             return
-
-        # Collect assistant content and tool calls
         assistant_content = []
         tool_calls = []
-
         for block in response.content:
             if block.type == "text":
                 assistant_content.append({"type": "text", "text": block.text})
             elif block.type == "tool_use":
                 tool_calls.append(block)
-
-        # Add assistant message to history
         messages.append({"role": "assistant", "content": assistant_content + [
             {"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.input}
             for tc in tool_calls
         ]})
-
-        # Log assistant thought
         for block in response.content:
             if block.type == "text" and block.text.strip():
                 with open(repair_log, "a") as f:
                     f.write(f"[LLM] {block.text[:200]}...\n")
-
         if not tool_calls:
-            # No more tool calls, repair done
             with open(repair_log, "a") as f:
                 f.write("[LLM] Repair conversation complete\n")
             return
-
-        # Execute tool calls
         tool_results = []
         for tc in tool_calls:
             if tc.name == "bash":
                 cmd = tc.input.get("cmd", "")
                 with open(repair_log, "a") as f:
                     f.write(f"[BASH] {cmd[:80]}\n")
-
                 output = run_bash(cmd, timeout=30, cwd=code_path)
-
-                # Truncate long output
                 if len(output) > 2000:
                     output = output[:1000] + "\n... (truncated) ...\n" + output[-500:]
-
                 with open(repair_log, "a") as f:
                     f.write(f"[BASH_OUT] {output[:200]}...\n")
-
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tc.id,
                     "content": output
                 })
-
-        # Add tool results to history
         messages.append({"role": "user", "content": tool_results})
-
-    # Max turns reached
     with open(repair_log, "a") as f:
         f.write("[LLM] Max turns reached, stopping\n")
 
-
 def repair_loop(workspace: Path, code_path: Path, repair_log: Path) -> int:
-    """
-    Run minimal repair loop.
-    Returns: 0=done (no crash or finished repair)
-    """
     crash_file = get_crash_file(workspace)
     if not crash_file:
-        return 0  # No fresh crash, nothing to repair
-
-    crash_content = crash_file.read_text()
-
-    # Write to repair log
+        return
     with open(repair_log, "a") as f:
-        f.write(f"\n{'='*50}\n")
-        f.write(f"[START] Repairing: {crash_file.name}\n")
-        f.write(f"Crash preview:\n{crash_content[:500]}...\n")
-
-    # Call LLM with bash tool to analyze and fix
-    _call_llm_repair(crash_content, workspace, code_path, repair_log)
-
-    # After repair (success or not), archive the crash file
-    archive_crash(crash_file, workspace)
-
+        f.write(f"[START] {crash_file.name}\n")
+    _call_llm_repair(workspace, code_path, repair_log)
     with open(repair_log, "a") as f:
-        f.write(f"[DONE]  Repaired: {crash_file.name} -> archived\n")
-
-    return 0
+        f.write("[DONE]\n")
+    return
 
 
 def main():
@@ -213,14 +162,11 @@ def main():
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--code-path", required=True)
     args = parser.parse_args()
-
     workspace = Path(args.workspace)
     code_path = Path(args.code_path)
     repair_log = workspace / "logs" / "repair.log"
     repair_log.parent.mkdir(parents=True, exist_ok=True)
-
-    exit_code = repair_loop(workspace, code_path, repair_log)
-    sys.exit(exit_code)
+    repair_loop(workspace, code_path, repair_log)
 
 
 if __name__ == "__main__":

@@ -116,7 +116,6 @@ async def _run_agent_loop(agent, channel, workspace: Path):
         await agent.stop()
 
 
-
 def _run_agent(
     channel: str,
     workspace: str | None,
