@@ -137,10 +137,3 @@ class Agent:
         # Use the loop's _process_message directly
         response = await self.loop._process_message(msg)
         return response.content if response else None
-
-    async def __aenter__(self):
-        await self.start()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.stop()
