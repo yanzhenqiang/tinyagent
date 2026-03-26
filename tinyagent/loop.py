@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import sys
+import traceback
 from contextlib import AsyncExitStack
 from datetime import datetime
 from pathlib import Path
@@ -307,12 +308,17 @@ class AgentLoop:
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
                 raise
-            except Exception:
-                logger.exception("Error processing message for session {}", msg.session_key)
-                await self.bus.outbound.put(OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content="Sorry, I encountered an error.",
-                ))
+            except Exception as e:
+                crash_info = traceback.format_exc()
+                if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                    logger.info("Expected exit: {}", e)
+                    raise
+
+                logger.error("Crash: {}", crash_info)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                crash_file = self.workspace / f"crash_{ts}.log"
+                crash_file.write_text(f"Crash at {datetime.now().isoformat()}\n\n{crash_info}")
+                raise
 
     async def close_mcp(self) -> None:
         if self._background_tasks:
@@ -367,7 +373,7 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         cmd = msg.content.strip().lower()
-        if handler := self._command_handlers.get(cmd):
+        if handler := self._COMMAND_HANDLERS.get(cmd):
             return handler(self, msg, session)
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
