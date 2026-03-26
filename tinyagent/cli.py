@@ -100,13 +100,6 @@ class ConfigError(Exception):
     pass
 
 
-# Exceptions that are NOT code crashes (no repair needed)
-EXPECTED_EXCEPTIONS = (
-    KeyboardInterrupt,
-    SystemExit,
-    ConfigError,
-)
-
 # Exceptions that ARE code crashes (need repair)
 CRASH_EXCEPTIONS = (
     AttributeError,
@@ -118,23 +111,15 @@ CRASH_EXCEPTIONS = (
 )
 
 
-async def _run_agent_loop(agent, channel, workspace: Path, error_msg: str | None = None):
+async def _run_agent_loop(agent, channel, workspace: Path):
     try:
         await agent.start()
         await channel.start()
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        # Check if this is a code crash that needs repair
-        if isinstance(e, EXPECTED_EXCEPTIONS):
-            raise  # No crash log for expected exceptions
-
-        # Write crash log for repair agent
         from tinyagent.agent import write_crash
         write_crash(Path(workspace), type(e), e, e.__traceback__)
-        if error_msg:
-            logger.error("Error: {}", error_msg)
-        raise
     finally:
         await channel.stop()
         await agent.stop()
@@ -148,7 +133,6 @@ def _run_agent(
     content: str | None = None,
     chat_id: str = "default",
     enable_cron: bool = True,
-    error_msg: str | None = None,
 ):
     if logs:
         _setup_logging(stderr=True)
@@ -187,7 +171,7 @@ def _run_agent(
         raise ValueError(f"Unknown channel type: {channel_type}")
 
     try:
-        asyncio.run(_run_agent_loop(agent, ch, ws_path, error_msg))
+        asyncio.run(_run_agent_loop(agent, ch, ws_path))
     except KeyboardInterrupt:
         logger.info("Shutting down...")
 
@@ -231,7 +215,6 @@ def gateway(
         content=None,
         chat_id=chat_id,
         enable_cron=True,
-        error_msg="Gateway crashed unexpectedly",
     )
 
 
