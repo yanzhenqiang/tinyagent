@@ -68,9 +68,12 @@ def rollback(code_path: str, log_file: str) -> str:
 
 def run_agent(workspace: str):
     import subprocess
+    import os
 
     cmd = [sys.executable, "-m", "tinyagent", CHANNEL, "--workspace", workspace, "--guard"]
-    return subprocess.Popen(cmd, cwd=workspace)
+    env = os.environ.copy()
+    env["TINYAGENT_GUARD_PID"] = str(os.getpid())
+    return subprocess.Popen(cmd, cwd=workspace, env=env)
 
 
 def run_repair(workspace: str, code_path: str) -> int:
