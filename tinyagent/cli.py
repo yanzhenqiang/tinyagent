@@ -1,6 +1,7 @@
 import asyncio
 import os
 import shutil
+import sys
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +11,7 @@ from loguru import logger
 from rich.console import Console
 from typer.core import TyperGroup
 
-from tinyagent.agent import Agent
+from tinyagent.agent import Agent, _make_crash_handler
 from tinyagent.channel_base import BaseChannel
 from tinyagent.channel_feishu import FeishuChannel
 from tinyagent.channel_terminal import TerminalChannel
@@ -136,45 +137,18 @@ def _run_agent(
 
     cfg = _load_config(config)
     ws_path = _init_workspace(cfg, workspace)
-    cfg.agent.workspace = str(ws_path)
-
-    from tinyagent.agent import _make_crash_handler
-    import sys
     sys.excepthook = _make_crash_handler(ws_path)
-
+    cfg.agent.workspace = str(ws_path)
     agent = Agent(cfg, ws_path, enable_cron=enable_cron)
-
-    if channel in cfg.channel.instances:
-        instance_cfg = cfg.channel.instances[channel]
-        if not isinstance(instance_cfg, ChannelInstanceConfig):
-            instance_cfg = ChannelInstanceConfig.model_validate(instance_cfg)
-        channel_type = instance_cfg.type
-        channel_cfg = instance_cfg.config
-    elif channel == "terminal":
-        channel_type = "terminal"
-        channel_cfg = SimpleNamespace(allow_from=["*"])
+    if channel == "terminal":
+        ch = TerminalChannel(SimpleNamespace(allow_from=["*"]), agent.bus)
     elif channel == "feishu":
-        channel_type = "feishu"
-        channel_cfg = cfg.channel.feishu if hasattr(cfg.channel, "feishu") else {}
+        ch = FeishuChannel(cfg.channel.feishu, agent.bus, cfg.channel)
     elif channel == "dummy":
-        channel_type = "dummy"
-        channel_cfg = SimpleNamespace(allow_from=["*"])
+        ch = BaseChannel(SimpleNamespace(allow_from=["*"]), agent.bus, content, chat_id)
     else:
         raise ValueError(f"Unknown channel: {channel}")
-
-    if channel_type == "terminal":
-        ch = TerminalChannel(channel_cfg, agent.bus)
-    elif channel_type == "feishu":
-        ch = FeishuChannel(channel_cfg, agent.bus, cfg.channel)
-    elif channel_type == "dummy":
-        ch = BaseChannel(channel_cfg, agent.bus, content, chat_id)
-    else:
-        raise ValueError(f"Unknown channel type: {channel_type}")
-
-    try:
-        asyncio.run(_run_agent_loop(agent, ch, ws_path))
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
+    asyncio.run(_run_agent_loop(agent, ch, ws_path))
 
 
 def _guard_running() -> bool:
