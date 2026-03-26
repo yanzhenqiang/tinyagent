@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Minimal repair agent - standalone, only bash tool.
+No exception, only write log.
 """
 import argparse
 import json

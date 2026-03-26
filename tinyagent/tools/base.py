@@ -152,12 +152,9 @@ class Tool(ABC):
         return errors
 
     def to_schema(self) -> dict[str, Any]:
-        """Convert tool to OpenAI function schema format."""
+        """Convert tool to Anthropic tool schema format."""
         return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": self.parameters,
-            },
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.parameters,
         }

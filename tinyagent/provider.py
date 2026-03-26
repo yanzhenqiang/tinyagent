@@ -65,18 +65,6 @@ class LLMProvider:
             else:
                 anthropic_messages.append({"role": msg["role"], "content": msg.get("content", "")})
 
-        # Convert tools
-        anthropic_tools = None
-        if tools:
-            anthropic_tools = []
-            for tool in tools:
-                if tool.get("type") == "function":
-                    func = tool.get("function", {})
-                    anthropic_tools.append({
-                        "name": func.get("name", ""),
-                        "description": func.get("description", ""),
-                        "input_schema": func.get("parameters", {"type": "object"}),
-                    })
 
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
@@ -86,8 +74,8 @@ class LLMProvider:
         }
         if system:
             kwargs["system"] = system
-        if anthropic_tools:
-            kwargs["tools"] = anthropic_tools
+        if tools:
+            kwargs["tools"] = tools
         if tool_choice:
             if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
                 kwargs["tool_choice"] = {"type": "tool", "name": tool_choice["function"]["name"]}
