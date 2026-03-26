@@ -285,7 +285,7 @@ class AgentLoop:
                 continue
 
             cmd = msg.content.strip().lower()
-            if handler := self._COMMAND_HANDLERS.get(cmd):
+            if handler := self._COMMAND_HAND.get(cmd):
                 response = await handler(self, msg)
                 if response:
                     await self.bus.outbound.put(response)
