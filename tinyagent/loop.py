@@ -97,6 +97,41 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
+    def _cmd_new(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+        snapshot = session.messages[session.last_consolidated:]
+        session.clear()
+        self.sessions.save(session)
+        self.sessions.invalidate(session.key)
+        if snapshot:
+            self._schedule_background(self.memory_consolidator.archive_messages(snapshot))
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="New session started.")
+
+    def _cmd_debug_on(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+        logging.getLogger("httpx").setLevel(logging.DEBUG)
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="httpx debug logging enabled.")
+
+    def _cmd_debug_off(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="httpx debug logging disabled.")
+
+    def _cmd_help(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+        lines = [
+            "/new — Start a new conversation",
+            "/stop — Stop the current task",
+            "/restart — Restart the bot",
+            "/debug_on — Enable httpx debug logging",
+            "/debug_off — Disable httpx debug logging",
+            "/help — Show available commands",
+        ]
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
+
+    _COMMAND_HANDLERS = {
+        "/new": _cmd_new,
+        "/debug_on": _cmd_debug_on,
+        "/debug_off": _cmd_debug_off,
+        "/help": _cmd_help,
+    }
+
     async def _connect_mcp(self) -> None:
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
             return
@@ -312,6 +347,23 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
+    async def _process_system_message(self, msg: InboundMessage, on_progress) -> OutboundMessage:
+        channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id))
+        logger.info("Processing system message from {}", msg.sender_id)
+        key = f"{channel}:{chat_id}"
+        session = self.sessions.get_or_create(key)
+        await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+        history = session.get_history(max_messages=0)
+        messages = self.context.build_messages(
+            history=history, current_message=msg.content, channel=channel, chat_id=chat_id
+        )
+        final_content, _, all_msgs = await self._run_agent_loop(messages, on_progress=on_progress)
+        self._save_turn(session, all_msgs, 1 + len(history))
+        self.sessions.save(session)
+        self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+        return OutboundMessage(channel=channel, chat_id=chat_id, content=final_content or "Background task completed.")
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -319,24 +371,7 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         if msg.channel == "system":
-            channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
-                                else ("cli", msg.chat_id))
-            logger.info("Processing system message from {}", msg.sender_id)
-            key = f"{channel}:{chat_id}"
-            session = self.sessions.get_or_create(key)
-            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=0)
-            messages = self.context.build_messages(
-                history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
-            )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
-            self._save_turn(session, all_msgs, 1 + len(history))
-            self.sessions.save(session)
-            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
-            return OutboundMessage(channel=channel, chat_id=chat_id,
-                                  content=final_content or "Background task completed.")
+            return await self._process_system_message(msg, on_progress)
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
@@ -345,39 +380,8 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         cmd = msg.content.strip().lower()
-        if cmd == "/new":
-            snapshot = session.messages[session.last_consolidated:]
-            session.clear()
-            self.sessions.save(session)
-            self.sessions.invalidate(session.key)
-
-            if snapshot:
-                self._schedule_background(self.memory_consolidator.archive_messages(snapshot))
-
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started.")
-        if cmd == "/debug_on":
-            logging.getLogger("httpx").setLevel(logging.DEBUG)
-            return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content="httpx debug logging enabled.",
-            )
-        if cmd == "/debug_off":
-            logging.getLogger("httpx").setLevel(logging.WARNING)
-            return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content="httpx debug logging disabled.",
-            )
-        if cmd == "/help":
-            lines = [
-                "/new — Start a new conversation",
-                "/stop — Stop the current task",
-                "/restart — Restart the bot",
-                "/debug_on — Enable httpx debug logging",
-                "/debug_off — Disable httpx debug logging",
-                "/help — Show available commands",
-            ]
-            return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
-            )
+        if handler := self._command_handlers.get(cmd):
+            return handler(self, msg, session)
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
@@ -424,33 +428,36 @@ class AgentLoop:
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         for m in messages[skip:]:
-            entry = dict(m)
-            role, content = entry.get("role"), entry.get("content")
-            if role == "assistant" and not content and not entry.get("tool_calls"):
-                continue  # skip empty assistant messages — they poison session context
-            if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
-                entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
-            elif role == "user":
-                if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    # Strip the runtime-context prefix, keep only the user text.
-                    parts = content.split("\n\n", 1)
-                    if len(parts) > 1 and parts[1].strip():
-                        entry["content"] = parts[1]
-                    else:
-                        continue
-                if isinstance(content, list):
-                    filtered = []
-                    for c in content:
-                        if c.get("type") == "text" and isinstance(c.get("text"), str) and c["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                            continue  # Strip runtime context from multimodal messages
-                        if (c.get("type") == "image_url"
-                                and c.get("image_url", {}).get("url", "").startswith("data:image/")):
-                            filtered.append({"type": "text", "text": "[image]"})
-                        else:
-                            filtered.append(c)
-                    if not filtered:
-                        continue
-                    entry["content"] = filtered
-            entry.setdefault("timestamp", datetime.now().isoformat())
-            session.messages.append(entry)
+            entry = self._clean_message(dict(m))
+            if entry:
+                entry.setdefault("timestamp", datetime.now().isoformat())
+                session.messages.append(entry)
         session.updated_at = datetime.now()
+
+    def _clean_message(self, msg: dict) -> dict | None:
+        role, content = msg.get("role"), msg.get("content")
+        if role == "assistant" and not content and not msg.get("tool_calls"):
+            return None
+        if role == "tool" and isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
+            msg["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
+        elif role == "user":
+            msg["content"] = self._clean_user_content(content)
+            if msg["content"] is None:
+                return None
+        return msg
+
+    def _clean_user_content(self, content: str | list) -> str | list | None:
+        if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
+            parts = content.split("\n\n", 1)
+            return parts[1] if len(parts) > 1 and parts[1].strip() else None
+        if not isinstance(content, list):
+            return content
+        filtered = []
+        for c in content:
+            if c.get("type") == "text" and isinstance(c.get("text"), str) and c["text"].startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
+                continue
+            if c.get("type") == "image_url" and c.get("image_url", {}).get("url", "").startswith("data:image/"):
+                filtered.append({"type": "text", "text": "[image]"})
+            else:
+                filtered.append(c)
+        return filtered if filtered else None

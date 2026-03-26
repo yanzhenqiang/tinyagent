@@ -167,44 +167,30 @@ class LLMProvider:
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        result: list[dict[str, Any]] = []
-        for msg in messages:
+        def _clean_content(msg: dict) -> dict:
             content = msg.get("content")
-
             if isinstance(content, str) and not content:
-                clean = dict(msg)
-                clean["content"] = None if (msg.get("role") == "assistant" and msg.get("tool_calls")) else "(empty)"
-                result.append(clean)
-                continue
-
+                return {**msg, "content": None if (msg.get("role") == "assistant" and msg.get("tool_calls")) else "(empty)"}
             if isinstance(content, list):
-                filtered = [
-                    item for item in content
-                    if not (
-                        isinstance(item, dict)
-                        and item.get("type") in ("text", "input_text", "output_text")
-                        and not item.get("text")
-                    )
-                ]
-                if len(filtered) != len(content):
-                    clean = dict(msg)
-                    if filtered:
-                        clean["content"] = filtered
-                    elif msg.get("role") == "assistant" and msg.get("tool_calls"):
-                        clean["content"] = None
-                    else:
-                        clean["content"] = "(empty)"
-                    result.append(clean)
-                    continue
-
+                return {**msg, "content": LLMProvider._filter_list_content(msg, content)}
             if isinstance(content, dict):
-                clean = dict(msg)
-                clean["content"] = [content]
-                result.append(clean)
-                continue
+                return {**msg, "content": [content]}
+            return msg
+        return [_clean_content(m) for m in messages]
 
-            result.append(msg)
-        return result
+    @staticmethod
+    def _filter_list_content(msg: dict, content: list) -> str | list | None:
+        filtered = [
+            item for item in content
+            if not (isinstance(item, dict) and item.get("type") in ("text", "input_text", "output_text") and not item.get("text"))
+        ]
+        if len(filtered) == len(content):
+            return content
+        if filtered:
+            return filtered
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            return None
+        return "(empty)"
 
     @staticmethod
     def _sanitize_request_messages(
@@ -220,14 +206,17 @@ class LLMProvider:
         return sanitized
 
     @classmethod
+    def _matches_markers(cls, content: str | None, markers: tuple[str, ...]) -> bool:
+        text = (content or "").lower()
+        return any(m in text for m in markers)
+
+    @classmethod
     def _is_transient_error(cls, content: str | None) -> bool:
-        err = (content or "").lower()
-        return any(marker in err for marker in cls._TRANSIENT_ERROR_MARKERS)
+        return cls._matches_markers(content, cls._TRANSIENT_ERROR_MARKERS)
 
     @classmethod
     def _is_image_unsupported_error(cls, content: str | None) -> bool:
-        err = (content or "").lower()
-        return any(marker in err for marker in cls._IMAGE_UNSUPPORTED_MARKERS)
+        return cls._matches_markers(content, cls._IMAGE_UNSUPPORTED_MARKERS)
 
     @staticmethod
     def _strip_image_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]] | None:

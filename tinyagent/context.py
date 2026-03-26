@@ -12,6 +12,12 @@ from tinyagent.utils import build_assistant_message, current_time_str, detect_im
 class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
+    _SKILLS_HINT = """The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
+Skills with available="false" need dependencies installed first - you can try installing them with apt/brew."""
+    _PLATFORM_POLICY = {
+        "Windows": "## Platform Policy (Windows)\n- You are running on Windows. Do not assume GNU tools like `grep`, `sed`, or `awk` exist.\n- Prefer Windows-native commands or file tools when they are more reliable.\n- If terminal output is garbled, retry with UTF-8 output enabled.",
+        "default": "## Platform Policy (POSIX)\n- You are running on a POSIX system. Prefer UTF-8 and standard shell tools.\n- Use file tools when they are simpler or more reliable than shell commands.",
+    }
 
     def __init__(self, workspace: Path):
         self.workspace = workspace
@@ -19,52 +25,27 @@ class ContextBuilder:
         self.skills = SkillsLoader(workspace)
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
-        parts = [self._get_identity()]
-
-        bootstrap = self._load_bootstrap_files()
-        if bootstrap:
-            parts.append(bootstrap)
-
-        memory = self.memory.get_memory_context()
-        if memory:
-            parts.append(f"# Memory\n\n{memory}")
-
-        always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
-
+        always_skills = self.skills.get_always_skills() or []
+        always_content = always_skills and self.skills.load_skills_for_context(always_skills)
         skills_summary = self.skills.build_skills_summary()
-        if skills_summary:
-            parts.append(f"""# Skills
 
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
-
-{skills_summary}""")
-
-        return "\n\n---\n\n".join(parts)
+        sections = [
+            self._get_identity(),
+            self._load_bootstrap_files(),
+            self.memory.get_memory_context() and f"# Memory\n\n{self.memory.get_memory_context()}",
+            always_content and f"# Active Skills\n\n{always_content}",
+            skills_summary and f"# Skills\n\n{self._SKILLS_HINT}\n\n{skills_summary}",
+        ]
+        return "\n\n---\n\n".join(filter(None, sections))
 
     def _get_identity(self) -> str:
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
+        platform_policy = self._PLATFORM_POLICY.get(system, self._PLATFORM_POLICY["default"])
+        return self._IDENTITY_TEMPLATE.format(runtime=runtime, workspace_path=workspace_path, platform_policy=platform_policy)
 
-        platform_policy = ""
-        if system == "Windows":
-            platform_policy = """## Platform Policy (Windows)
-- You are running on Windows. Do not assume GNU tools like `grep`, `sed`, or `awk` exist.
-- Prefer Windows-native commands or file tools when they are more reliable.
-- If terminal output is garbled, retry with UTF-8 output enabled.
-"""
-        else:
-            platform_policy = """## Platform Policy (POSIX)
-- You are running on a POSIX system. Prefer UTF-8 and standard shell tools.
-- Use file tools when they are simpler or more reliable than shell commands.
-"""
-
-        return f"""# tinyagent 🐈
+    _IDENTITY_TEMPLATE = """# tinyagent 🐈
 
 You are tinyagent, a helpful AI assistant.
 
