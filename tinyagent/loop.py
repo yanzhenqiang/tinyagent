@@ -270,8 +270,22 @@ class AgentLoop:
 
         return final_content, tools_used, messages
 
+    def _handle_exception(self, _loop, context):
+        """Global exception handler for asyncio."""
+        exception = context.get("exception")
+        if exception:
+            if isinstance(exception, (KeyboardInterrupt, SystemExit)):
+                return
+            crash_info = "".join(traceback.format_exception(type(exception), exception, exception.__traceback__))
+            logger.error("Crash: {}", crash_info)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            crash_file = self.workspace / f"crash_{ts}.log"
+            crash_file.write_text(f"Crash at {datetime.now().isoformat()}\n\n{crash_info}")
+            sys.exit(1)
+
     async def run(self) -> None:
         self._running = True
+        asyncio.get_event_loop().set_exception_handler(self._handle_exception)
         await self._connect_mcp()
         logger.info("Agent loop started")
 
