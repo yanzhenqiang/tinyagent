@@ -198,6 +198,12 @@ def _run_agent(
         logger.info("Shutting down...")
 
 
+def _guard_running() -> bool:
+    import subprocess
+    r = subprocess.run(["pgrep", "-f", "tinyagent_guard"], capture_output=True)
+    return r.returncode == 0 and r.stdout.strip()
+
+
 @app.command("gateway", help="Start gateway server.")
 def gateway(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
@@ -207,7 +213,7 @@ def gateway(
     guard: bool = typer.Option(False, "--guard", help="Enable guard mode (auto-restart on crash)"),
     code_path: str | None = typer.Option(None, "--code-path", help="Code path for git rollback (guard mode only)"),
 ):
-    if guard:
+    if guard and not _guard_running():
         from tinyagent.tinyagent_guard import main as guard_main
         from tinyagent.config import get_workspace_path
         ws = str(workspace) if workspace else str(get_workspace_path())
