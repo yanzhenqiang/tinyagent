@@ -93,11 +93,6 @@ def _init_workspace(config: Config, workspace: str | None) -> Path:
     return ws_path
 
 
-def _write_crash_log(workspace: Path, exc_info: str) -> None:
-    """Write crash log to workspace for repair agent."""
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    crash_file = workspace / f"crash_{ts}.log"
-    crash_file.write_text(f"Crash at {datetime.now().isoformat()}\n\n{exc_info}")
 
 
 class ConfigError(Exception):
@@ -135,11 +130,10 @@ async def _run_agent_loop(agent, channel, workspace: Path, error_msg: str | None
             raise  # No crash log for expected exceptions
 
         # Write crash log for repair agent
-        crash_info = traceback.format_exc()
-        _write_crash_log(Path(workspace), crash_info)
+        from tinyagent.agent import write_crash
+        write_crash(Path(workspace), type(e), e, e.__traceback__)
         if error_msg:
             logger.error("Error: {}", error_msg)
-            logger.error(crash_info)
         raise
     finally:
         await channel.stop()
