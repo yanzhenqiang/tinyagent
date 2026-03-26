@@ -69,7 +69,7 @@ def rollback(code_path: str, log_file: str) -> str:
 def run_agent(workspace: str):
     import subprocess
 
-    cmd = [sys.executable, "-m", "tinyagent", CHANNEL, "--workspace", workspace, "--guard"]
+    cmd = [sys.executable, "-m", "tinyagent", CHANNEL, "--workspace", workspace]
     return subprocess.Popen(cmd, cwd=workspace)
 
 
