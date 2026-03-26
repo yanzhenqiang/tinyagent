@@ -8,7 +8,7 @@ from tinyagent.bus import InboundMessage, MessageBus
 from tinyagent.config import Config, get_cron_dir
 from tinyagent.cron_service import CronService
 from tinyagent.loop import AgentLoop
-from tinyagent.provider import GenerationSettings, LLMProvider
+from tinyagent.provider import LLMProvider
 from tinyagent.session import SessionManager
 
 
@@ -47,9 +47,6 @@ class Agent:
             api_base=p.api_base if p else None,
             default_model=model,
             provider_name=provider_name,
-        )
-
-        self.provider.generation = GenerationSettings(
             temperature=config.agent.temperature,
             max_tokens=config.agent.max_tokens,
             reasoning_effort=config.agent.reasoning_effort,

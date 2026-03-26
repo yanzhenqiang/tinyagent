@@ -38,13 +38,6 @@ class LLMResponse:
 
 
 @dataclass(frozen=True)
-class GenerationSettings:
-    temperature: float = 0.7
-    max_tokens: int = 4096
-    reasoning_effort: str | None = None
-
-
-@dataclass(frozen=True)
 class ProviderSpec:
     name: str
     env_key: str
@@ -126,12 +119,17 @@ class LLMProvider:
         api_base: str | None = None,
         default_model: str = "claude-opus-4-5",
         provider_name: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        reasoning_effort: str | None = None,
     ):
         self.api_key = api_key
         self.api_base = api_base
         self.default_model = default_model
         self.provider_name = provider_name
-        self.generation: GenerationSettings = GenerationSettings()
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
         self._client = None
 
         if api_key:
@@ -244,11 +242,11 @@ class LLMProvider:
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         if max_tokens is self._SENTINEL:
-            max_tokens = self.generation.max_tokens
+            max_tokens = self.max_tokens
         if temperature is self._SENTINEL:
-            temperature = self.generation.temperature
+            temperature = self.temperature
         if reasoning_effort is self._SENTINEL:
-            reasoning_effort = self.generation.reasoning_effort
+            reasoning_effort = self.reasoning_effort
 
         kw: dict[str, Any] = dict(
             messages=messages, tools=tools, model=model,
