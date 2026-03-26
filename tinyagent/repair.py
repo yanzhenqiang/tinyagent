@@ -64,7 +64,9 @@ Workspace: {workspace}
 Code path: {code_path}
 
 Crash files are in {workspace}/crash_*.log
-After fixing, move the crash file to {workspace}/history_crash/
+After fixing:
+- Move crash file to {workspace}/history_crash/
+- Copy repair log from {workspace}/logs/repair.log to {workspace}/repair_history/repair_<timestamp>.log
 
 Available tool: bash(cmd) to execute shell commands.
 
@@ -74,8 +76,9 @@ Your task:
 3. Read relevant source files
 4. Identify root cause and make minimal fixes
 5. Verify the fix works
-6. Move crash file to history_crash directory
-7. Report what you changed
+6. Create repair_history dir and copy repair.log with timestamp
+7. Move crash file to history_crash directory
+8. Report what you changed
 
 Be minimal. Only fix the obvious bug. Do not refactor."""
 
