@@ -2,6 +2,7 @@ import asyncio
 import os
 import shutil
 import traceback
+from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
@@ -92,16 +93,53 @@ def _init_workspace(config: Config, workspace: str | None) -> Path:
     return ws_path
 
 
-async def _run_agent_loop(agent, channel, error_msg: str | None = None):
+def _write_crash_log(workspace: Path, exc_info: str) -> None:
+    """Write crash log to workspace for repair agent."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    crash_file = workspace / f"crash_{ts}.log"
+    crash_file.write_text(f"Crash at {datetime.now().isoformat()}\n\n{exc_info}")
+
+
+class ConfigError(Exception):
+    """Configuration error, not a code crash."""
+    pass
+
+
+# Exceptions that are NOT code crashes (no repair needed)
+EXPECTED_EXCEPTIONS = (
+    KeyboardInterrupt,
+    SystemExit,
+    ConfigError,
+)
+
+# Exceptions that ARE code crashes (need repair)
+CRASH_EXCEPTIONS = (
+    AttributeError,
+    TypeError,
+    IndexError,
+    KeyError,
+    ImportError,
+    NameError,
+)
+
+
+async def _run_agent_loop(agent, channel, workspace: Path, error_msg: str | None = None):
     try:
         await agent.start()
         await channel.start()
     except KeyboardInterrupt:
         pass
-    except Exception:
+    except Exception as e:
+        # Check if this is a code crash that needs repair
+        if isinstance(e, EXPECTED_EXCEPTIONS):
+            raise  # No crash log for expected exceptions
+
+        # Write crash log for repair agent
+        crash_info = traceback.format_exc()
+        _write_crash_log(Path(workspace), crash_info)
         if error_msg:
             logger.error("Error: {}", error_msg)
-            logger.error(traceback.format_exc())
+            logger.error(crash_info)
         raise
     finally:
         await channel.stop()
@@ -155,7 +193,7 @@ def _run_agent(
         raise ValueError(f"Unknown channel type: {channel_type}")
 
     try:
-        asyncio.run(_run_agent_loop(agent, ch, error_msg))
+        asyncio.run(_run_agent_loop(agent, ch, ws_path, error_msg))
     except KeyboardInterrupt:
         logger.info("Shutting down...")
 

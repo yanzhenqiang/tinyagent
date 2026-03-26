@@ -73,6 +73,20 @@ def run_agent(workspace: str):
     return subprocess.Popen(cmd, cwd=workspace)
 
 
+def run_repair(workspace: str, code_path: str) -> int:
+    import subprocess
+
+    cmd = [sys.executable, "-m", "tinyagent.repair", "--workspace", workspace, "--code-path", code_path]
+    proc = subprocess.Popen(cmd, cwd=workspace)
+    try:
+        proc.wait(timeout=300)  # 5 minutes timeout
+        return proc.returncode
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        return -1  # timeout marker
+
+
 def main(workspace: str, code_path: str):
     log_file = os.path.join(workspace, LOG)
 
@@ -81,6 +95,10 @@ def main(workspace: str, code_path: str):
 
     while True:
         touch_heartbeat(workspace)
+
+        # Run repair before starting agent (repair logs its own actions)
+        log(log_file, "repair", "starting repair agent")
+        run_repair(workspace, code_path)  # ignore result, repair logs itself
 
         proc = run_agent(workspace)
         log(log_file, "spawn", f"pid={proc.pid}")
