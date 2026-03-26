@@ -133,7 +133,6 @@ def _run_agent(
     ws_path = _init_workspace(cfg, workspace)
     if guard and not _guard_running():
         import subprocess
-        import sys
         cp = code_path if code_path else os.getcwd()
         cmd = [sys.executable, "-m", "tinyagent.tinyagent_guard", str(ws_path), cp]
         subprocess.Popen(cmd)
