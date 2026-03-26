@@ -199,7 +199,9 @@ def _run_agent(
 
 
 def _guard_running() -> bool:
-    return os.environ.get("TINYAGENT_GUARD_PID") is not None
+    import subprocess
+    r = subprocess.run(["pgrep", "-f", "gateway.*--guard"], capture_output=True)
+    return r.returncode == 0 and r.stdout.strip()
 
 
 @app.command("gateway", help="Start gateway server.")
