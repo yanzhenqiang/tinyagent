@@ -85,7 +85,6 @@ class AgentLoop:
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
@@ -98,7 +97,8 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
-    def _cmd_new(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+    def _cmd_new(self, msg: InboundMessage) -> OutboundMessage:
+        session = self.sessions.get_or_create(msg.session_key)
         snapshot = session.messages[session.last_consolidated:]
         session.clear()
         self.sessions.save(session)
@@ -107,15 +107,15 @@ class AgentLoop:
             self._schedule_background(self.memory_consolidator.archive_messages(snapshot))
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="New session started.")
 
-    def _cmd_debug_on(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+    def _cmd_debug_on(self, msg: InboundMessage) -> OutboundMessage:
         logging.getLogger("httpx").setLevel(logging.DEBUG)
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="httpx debug logging enabled.")
 
-    def _cmd_debug_off(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+    def _cmd_debug_off(self, msg: InboundMessage) -> OutboundMessage:
         logging.getLogger("httpx").setLevel(logging.WARNING)
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="httpx debug logging disabled.")
 
-    def _cmd_help(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+    def _cmd_help(self, msg: InboundMessage) -> OutboundMessage:
         lines = [
             "/new — Start a new conversation",
             "/stop — Stop the current task",
@@ -292,7 +292,7 @@ class AgentLoop:
                 if inspect.iscoroutinefunction(handler):
                     response = await handler(self, msg)
                 else:
-                    response = handler(self, msg, None)
+                    response = handler(self, msg)
                 if response:
                     await self.bus.outbound.put(response)
             else:
