@@ -281,8 +281,14 @@ class AgentLoop:
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
-                logger.warning("Error consuming inbound message: {}, continuing...", e)
-                continue
+                if isinstance(e, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+                    raise
+                crash_info = traceback.format_exc()
+                logger.error("Crash: {}", crash_info)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                crash_file = self.workspace / f"crash_{ts}.log"
+                crash_file.write_text(f"Crash at {datetime.now().isoformat()}\n\n{crash_info}")
+                raise
 
             cmd = msg.content.strip().lower()
             if handler := self._COMMAND_HAND.get(cmd):

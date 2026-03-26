@@ -16,10 +16,8 @@ HEARTBEAT = "HEARTBEAT"
 GUARD_PROC = "tinyagent_guard"
 
 
-def _guard_running() -> bool:
-    import subprocess
-    r = subprocess.run(["pgrep", "-f", GUARD_PROC], capture_output=True)
-    return r.returncode == 0 and r.stdout.strip()
+def _should_heartbeat() -> bool:
+    return True
 
 
 async def _heartbeat_task(workspace: str):
@@ -94,7 +92,7 @@ class Agent:
             return
         self._running = True
 
-        if _guard_running():
+        if _should_heartbeat():
             self._tasks.append(asyncio.create_task(_heartbeat_task(str(self.workspace))))
             logger.info("Guard heartbeat enabled")
 
