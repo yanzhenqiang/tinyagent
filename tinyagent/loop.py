@@ -278,6 +278,16 @@ class AgentLoop:
         while self._running:
             try:
                 msg = await asyncio.wait_for(self.bus.inbound.get(), timeout=1.0)
+
+                cmd = msg.content.strip().lower()
+                if handler := self._COMMAND_HAND.get(cmd):
+                    response = await handler(self, msg)
+                    if response:
+                        await self.bus.outbound.put(response)
+                else:
+                    task = asyncio.create_task(self._dispatch(msg))
+                    self._active_tasks.setdefault(msg.session_key, []).append(task)
+                    task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
@@ -289,16 +299,6 @@ class AgentLoop:
                 crash_file = self.workspace / f"crash_{ts}.log"
                 crash_file.write_text(f"Crash at {datetime.now().isoformat()}\n\n{crash_info}")
                 raise
-
-            cmd = msg.content.strip().lower()
-            if handler := self._COMMAND_HAND.get(cmd):
-                response = await handler(self, msg)
-                if response:
-                    await self.bus.outbound.put(response)
-            else:
-                task = asyncio.create_task(self._dispatch(msg))
-                self._active_tasks.setdefault(msg.session_key, []).append(task)
-                task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         async with self._processing_lock:
