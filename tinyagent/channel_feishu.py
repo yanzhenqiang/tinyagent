@@ -255,12 +255,10 @@ class FeishuChannel(BaseChannel):
 
     async def start(self) -> None:
         if not FEISHU_AVAILABLE:
-            logger.error("Feishu SDK not installed. Run: pip install lark-oapi")
-            return
+            raise RuntimeError("Feishu SDK not installed. Run: pip install lark-oapi")
 
         if not self.config.app_id or not self.config.app_secret:
-            logger.error("Feishu app_id and app_secret not configured")
-            return
+            raise ValueError("Feishu app_id and app_secret not configured")
 
         import lark_oapi as lark
         self._running = True
