@@ -229,7 +229,6 @@ def gateway(
         cp = code_path if code_path else os.getcwd()
         cmd = [sys.executable, "-m", "tinyagent.tinyagent_guard", ws, cp]
         subprocess.Popen(cmd)
-        return
     _run_agent(
         channel="feishu",
         workspace=workspace,
