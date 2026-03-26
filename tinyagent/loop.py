@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -125,8 +126,40 @@ class AgentLoop:
         ]
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
 
+    async def _cmd_stop(self, msg: InboundMessage) -> OutboundMessage:
+        tasks = self._active_tasks.pop(msg.session_key, [])
+        cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
+        for t in tasks:
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
+        content = f"Stopped {cancelled} task(s)." if cancelled else "No active task to stop."
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
+
+    async def _cmd_restart(self, msg: InboundMessage) -> OutboundMessage:
+        async def _do_restart():
+            await asyncio.sleep(1)
+            os.environ["TINYAGENT_RESTART"] = f"{msg.channel}:{msg.chat_id}"
+            os.execv(sys.executable, [sys.executable, "-m", "tinyagent"] + sys.argv[1:])
+        asyncio.create_task(_do_restart())
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Restarting...")
+
+    async def _cmd_status(self, msg: InboundMessage) -> OutboundMessage:
+        lines = ["🐍 tinyagent Status\n", f"Model: {self.model}"]
+        for spec in PROVIDERS:
+            p = getattr(self.provider.config if hasattr(self.provider, 'config') else self.provider, spec.name, None)
+            if p is None:
+                continue
+            has_key = bool(p.api_key if hasattr(p, 'api_key') else False)
+            lines.append(f"{spec.label}: {'✓' if has_key else 'not set'}")
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
+
     _COMMAND_HANDLERS = {
         "/new": _cmd_new,
+        "/stop": _cmd_stop,
+        "/restart": _cmd_restart,
+        "/status": _cmd_status,
         "/debug_on": _cmd_debug_on,
         "/debug_off": _cmd_debug_off,
         "/help": _cmd_help,
@@ -255,56 +288,17 @@ class AgentLoop:
                 continue
 
             cmd = msg.content.strip().lower()
-            if cmd == "/stop":
-                await self._handle_stop(msg)
-            elif cmd == "/restart":
-                await self._handle_restart(msg)
-            elif cmd == "/status":
-                await self._handle_status(msg)
+            if handler := self._COMMAND_HANDLERS.get(cmd):
+                if inspect.iscoroutinefunction(handler):
+                    response = await handler(self, msg)
+                else:
+                    response = handler(self, msg, None)
+                if response:
+                    await self.bus.outbound.put(response)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
                 task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
-
-    async def _handle_stop(self, msg: InboundMessage) -> None:
-        tasks = self._active_tasks.pop(msg.session_key, [])
-        cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
-        for t in tasks:
-            try:
-                await t
-            except (asyncio.CancelledError, Exception):
-                pass
-        total = cancelled
-        content = f"Stopped {total} task(s)." if total else "No active task to stop."
-        await self.bus.outbound.put(OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content=content,
-        ))
-
-    async def _handle_restart(self, msg: InboundMessage) -> None:
-        """Restart the process in-place via os.execv."""
-        await self.bus.outbound.put(OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content="Restarting...",
-        ))
-
-        async def _do_restart():
-            await asyncio.sleep(1)
-            os.environ["TINYAGENT_RESTART"] = f"{msg.channel}:{msg.chat_id}"
-            os.execv(sys.executable, [sys.executable, "-m", "tinyagent"] + sys.argv[1:])
-
-        asyncio.create_task(_do_restart())
-
-    async def _handle_status(self, msg: InboundMessage) -> None:
-        lines = ["🐍 tinyagent Status\n"]
-        lines.append(f"Model: {self.model}")
-        for spec in PROVIDERS:
-            p = getattr(self.provider.config if hasattr(self.provider, 'config') else self.provider, spec.name, None)
-            if p is None:
-                continue
-            has_key = bool(p.api_key if hasattr(p, 'api_key') else False)
-            lines.append(f"{spec.label}: {'✓' if has_key else 'not set'}")
-        await self.bus.outbound.put(OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines),
-        ))
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         async with self._processing_lock:
