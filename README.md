@@ -12,7 +12,6 @@ Agent always run and self-repair and self improve
 3 然后当前健康状态检查，方便后续对比诊断
 4. memory重整，（重新整理后怎么验证有效呢？我没有想明白）
                                  
-
 ## CLI Reference
 
 | Command | Description |
@@ -20,44 +19,4 @@ Agent always run and self-repair and self improve
 | `tinyagent chat` | Interactive chat mode (Terminal channel) |
 | `tinyagent message "task"` | One-shot message mode |
 | `tinyagent gateway` | Start Feishu gateway |
-| `tinyagent guard` | Start Guard supervisor (production) |
-
-### Development vs Production
-
-```bash
-# Development - run Agent directly
-python -m tinyagent chat
-
-# Production - run under Guard
-python -m tinyagent guard
-```
-
----
-
-## Create a Feishu bot
-- Visit [Feishu Open Platform](https://open.feishu.cn/app)
-- Create a new app → Enable **Bot** capability
-- **Permissions**: Add `im:message` (send messages) and `im:message.p2p_msg:readonly` (receive messages)
-- **Events**: Add `im.message.receive_v1` (receive messages)
-  - Select **Long Connection** mode
-- Get **App ID** and **App Secret** from "Credentials & Basic Info"
-- Publish the app
-
-```json
-{
-  "channels": {
-    "feishu": {
-      "enabled": true,
-      "appId": "cli_xxx",
-      "appSecret": "xxx",
-      "encryptKey": "",
-      "verificationToken": "",
-      "allowFrom": ["ou_YOUR_OPEN_ID"],
-      "groupPolicy": "mention"
-    }
-  }
-}
-```
-> `encryptKey` and `verificationToken` are optional for Long Connection mode.
-> `allowFrom`: Add your open_id. Use `["*"]` to allow all users.
-> `groupPolicy`: `"mention"` (respond only when @mentioned), `"open"` (respond to all group messages). Private chats always respond.
+| `tinyagent gateway --guard` | Start Guard supervisor (production) |
