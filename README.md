@@ -12,9 +12,13 @@ Guard (supervisor)
     │   - Try fix with bash tool
     │   - Move crash to history_crash/
     │
-    └─► Start Agent ──► Monitor heartbeat
+    └─► Start Agent ──► Monitor heartbeat (5s interval)
+        │
+        ├─ No heartbeat 30s ──► Kill ──► Write crash_*.log ──► Back to Repair
         │
         ├─ Crash ──► Write crash_*.log ──► Back to Repair
+        │
+        ├─ 3 crashes ──► Git rollback ──► Back to Repair
         │
         └─ User exit ──► Done
 ```
@@ -31,6 +35,16 @@ Guard (supervisor)
 - Repair has only `bash` tool, uses LLM to analyze and fix
 - Repair logs all actions to `workspace/logs/repair.log`
 - After repair (success or fail), crash moves to `history_crash/`
+
+### Guard Heartbeat
+
+Agent writes heartbeat every 5s to `workspace/HEARTBEAT`
+
+Guard checks:
+- Heartbeat timeout 30s → Agent hang → Kill → Crash log → Repair
+- Process exit with code → Write crash log → Repair
+- 3 consecutive crashes → Git rollback → Repair
+- Clean exit (code 0) → Shutdown
 
 ### Directory Structure
 
