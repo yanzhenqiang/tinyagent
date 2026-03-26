@@ -131,7 +131,18 @@ def _run_agent(
     content: str | None = None,
     chat_id: str = "default",
     enable_cron: bool = True,
+    guard: bool = False,
+    code_path: str | None = None,
 ):
+    if guard and not _guard_running():
+        import subprocess
+        import sys
+        from tinyagent.config import get_workspace_path
+        ws = str(workspace) if workspace else str(get_workspace_path())
+        cp = code_path if code_path else os.getcwd()
+        cmd = [sys.executable, "-m", "tinyagent.tinyagent_guard", ws, cp]
+        subprocess.Popen(cmd)
+
     if logs:
         _setup_logging(stderr=True)
 
@@ -173,23 +184,14 @@ def gateway(
     guard: bool = typer.Option(False, "--guard", help="Enable guard mode (auto-restart on crash)"),
     code_path: str | None = typer.Option(None, "--code-path", help="Code path for git rollback (guard mode only)"),
 ):
-    if guard and not _guard_running():
-        import subprocess
-        import sys
-
-        from tinyagent.config import get_workspace_path
-        ws = str(workspace) if workspace else str(get_workspace_path())
-        cp = code_path if code_path else os.getcwd()
-        cmd = [sys.executable, "-m", "tinyagent.tinyagent_guard", ws, cp]
-        subprocess.Popen(cmd)
     _run_agent(
         channel="feishu",
         workspace=workspace,
         config=config,
         logs=logs,
-        content=None,
         chat_id=chat_id,
-        enable_cron=True,
+        guard=guard,
+        code_path=code_path,
     )
 
 
