@@ -12,7 +12,6 @@ from rich.console import Console
 from typer.core import TyperGroup
 
 from tinyagent.agent import Agent
-from tinyagent.channel_base import create_channel
 from tinyagent.config import (
     ChannelInstanceConfig,
     Config,
@@ -23,6 +22,9 @@ from tinyagent.config import (
     save_config,
     set_config_path,
 )
+from tinyagent.channel_terminal import TerminalChannel
+from tinyagent.channel_feishu import FeishuChannel
+from tinyagent.channel_base import BaseChannel
 
 
 def _setup_logging(stderr=False):
@@ -106,22 +108,6 @@ async def _run_agent_loop(agent, channel, error_msg: str | None = None):
         await agent.stop()
 
 
-def _resolve_channel_config(cfg: Config, channel: str):
-    if channel in cfg.channel.instances:
-        instance_cfg = cfg.channel.instances[channel]
-        if not isinstance(instance_cfg, ChannelInstanceConfig):
-            instance_cfg = ChannelInstanceConfig.model_validate(instance_cfg)
-        return instance_cfg.type, instance_cfg.config, cfg.channel
-    if channel == "terminal":
-        return "terminal", SimpleNamespace(allow_from=["*"]), cfg.channel
-    elif channel == "feishu":
-        return "feishu", cfg.channel.feishu if hasattr(cfg.channel, "feishu") else {}, cfg.channel
-    elif channel == "dummy":
-        return "dummy", SimpleNamespace(allow_from=["*"]), cfg.channel
-    else:
-        raise ValueError(f"Unknown channel: {channel}")
-
-
 def _run_agent(
     channel: str,
     workspace: str | None,
@@ -139,17 +125,34 @@ def _run_agent(
     ws_path = _init_workspace(cfg, workspace)
     cfg.agent.workspace = str(ws_path)
 
-    channel_type, channel_cfg, global_cfg = _resolve_channel_config(cfg, channel)
     agent = Agent(cfg, ws_path, enable_cron=enable_cron)
 
-    ch = create_channel(
-        channel_type=channel_type,
-        config=channel_cfg,
-        bus=agent.bus,
-        content=content,
-        chat_id=chat_id,
-        global_config=global_cfg,
-    )
+    if channel in cfg.channel.instances:
+        instance_cfg = cfg.channel.instances[channel]
+        if not isinstance(instance_cfg, ChannelInstanceConfig):
+            instance_cfg = ChannelInstanceConfig.model_validate(instance_cfg)
+        channel_type = instance_cfg.type
+        channel_cfg = instance_cfg.config
+    elif channel == "terminal":
+        channel_type = "terminal"
+        channel_cfg = SimpleNamespace(allow_from=["*"])
+    elif channel == "feishu":
+        channel_type = "feishu"
+        channel_cfg = cfg.channel.feishu if hasattr(cfg.channel, "feishu") else {}
+    elif channel == "dummy":
+        channel_type = "dummy"
+        channel_cfg = SimpleNamespace(allow_from=["*"])
+    else:
+        raise ValueError(f"Unknown channel: {channel}")
+
+    if channel_type == "terminal":
+        ch = TerminalChannel(channel_cfg, agent.bus)
+    elif channel_type == "feishu":
+        ch = FeishuChannel(channel_cfg, agent.bus, cfg.channel)
+    elif channel_type == "dummy":
+        ch = BaseChannel(channel_cfg, agent.bus, content, chat_id)
+    else:
+        raise ValueError(f"Unknown channel type: {channel_type}")
 
     try:
         asyncio.run(_run_agent_loop(agent, ch, error_msg))

@@ -14,10 +14,6 @@ class ContextBuilder:
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _SKILLS_HINT = """The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew."""
-    _PLATFORM_POLICY = {
-        "Windows": "## Platform Policy (Windows)\n- You are running on Windows. Do not assume GNU tools like `grep`, `sed`, or `awk` exist.\n- Prefer Windows-native commands or file tools when they are more reliable.\n- If terminal output is garbled, retry with UTF-8 output enabled.",
-        "default": "## Platform Policy (POSIX)\n- You are running on a POSIX system. Prefer UTF-8 and standard shell tools.\n- Use file tools when they are simpler or more reliable than shell commands.",
-    }
 
     def __init__(self, workspace: Path):
         self.workspace = workspace
@@ -42,8 +38,7 @@ Skills with available="false" need dependencies installed first - you can try in
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
-        platform_policy = self._PLATFORM_POLICY.get(system, self._PLATFORM_POLICY["default"])
-        return self._IDENTITY_TEMPLATE.format(runtime=runtime, workspace_path=workspace_path, platform_policy=platform_policy)
+        return self._IDENTITY_TEMPLATE.format(runtime=runtime, workspace_path=workspace_path)
 
     _IDENTITY_TEMPLATE = """# tinyagent 🐈
 
@@ -57,8 +52,6 @@ Your workspace is at: {workspace_path}
 - Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
 - History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
-
-{platform_policy}
 
 ## tinyagent Guidelines
 - State intent before tool calls, but NEVER predict or claim results before receiving them.
