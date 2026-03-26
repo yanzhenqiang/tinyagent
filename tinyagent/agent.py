@@ -16,10 +16,6 @@ HEARTBEAT = "HEARTBEAT"
 GUARD_PROC = "tinyagent_guard"
 
 
-def _should_heartbeat() -> bool:
-    return True
-
-
 async def _heartbeat_task(workspace: str):
     while True:
         heartbeat_file = os.path.join(workspace, HEARTBEAT)
@@ -92,9 +88,7 @@ class Agent:
             return
         self._running = True
 
-        if _should_heartbeat():
-            self._tasks.append(asyncio.create_task(_heartbeat_task(str(self.workspace))))
-            logger.info("Guard heartbeat enabled")
+        self._tasks.append(asyncio.create_task(_heartbeat_task(str(self.workspace))))
 
         if self.cron:
             await self.cron.start()
