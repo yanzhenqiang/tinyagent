@@ -15,12 +15,7 @@ from tinyagent.provider import LLMProvider
 from tinyagent.session import SessionManager
 
 
-HEARTBEAT = "HEARTBEAT"
-GUARD_PROC = "tinyagent_guard"
-
-
 def write_crash(workspace: Path, exc_type, exc_val, exc_tb) -> None:
-    """Write crash log and exit. Used by both sync and async handlers."""
     if issubclass(exc_type, (KeyboardInterrupt, SystemExit)):
         return
     crash_info = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
@@ -39,7 +34,7 @@ def _make_crash_handler(workspace: Path):
 
 async def _heartbeat_task(workspace: str):
     while True:
-        heartbeat_file = os.path.join(workspace, HEARTBEAT)
+        heartbeat_file = os.path.join(workspace, "HEARTBEAT")
         with open(heartbeat_file, "a"):
             os.utime(heartbeat_file, None)
         await asyncio.sleep(5)
@@ -55,13 +50,7 @@ class Agent:
         self.config = config
         self.workspace = workspace or config.workspace_path
         self.workspace.mkdir(parents=True, exist_ok=True)
-
-        # Set global crash handler
-        sys.excepthook = _make_crash_handler(self.workspace)
-
         self.bus = MessageBus()
-
-        # Initialize provider
         model = config.agent.model
         provider_name = config.agent.provider
         p = getattr(config.provider, provider_name, None)
@@ -78,7 +67,6 @@ class Agent:
 
         self.session_manager = SessionManager(self.workspace)
 
-        # Initialize cron service if enabled
         self.cron: CronService | None = None
         if enable_cron:
             cron_store_path = get_cron_dir() / "jobs.json"
@@ -108,32 +96,23 @@ class Agent:
         if self._running:
             return
         self._running = True
-
         self._tasks.append(asyncio.create_task(_heartbeat_task(str(self.workspace))))
-
         if self.cron:
             await self.cron.start()
-
         self._tasks.append(asyncio.create_task(self.loop.run()))
         logger.info("Agent started")
 
     async def stop(self) -> None:
-        """Stop the agent loop."""
         if not self._running:
             return
         self._running = False
-
-        # Cancel all tasks
         for task in self._tasks:
             if not task.done():
                 task.cancel()
-
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
-
         if self.cron:
             self.cron.stop()
-
         self.loop.stop()
         await self.loop.close_mcp()
         logger.info("Agent stopped")

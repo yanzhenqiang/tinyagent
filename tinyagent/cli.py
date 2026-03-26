@@ -1,8 +1,6 @@
 import asyncio
 import os
 import shutil
-import traceback
-from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +11,9 @@ from rich.console import Console
 from typer.core import TyperGroup
 
 from tinyagent.agent import Agent
+from tinyagent.channel_base import BaseChannel
+from tinyagent.channel_feishu import FeishuChannel
+from tinyagent.channel_terminal import TerminalChannel
 from tinyagent.config import (
     ChannelInstanceConfig,
     Config,
@@ -23,16 +24,12 @@ from tinyagent.config import (
     save_config,
     set_config_path,
 )
-from tinyagent.channel_terminal import TerminalChannel
-from tinyagent.channel_feishu import FeishuChannel
-from tinyagent.channel_base import BaseChannel
 
 
 def _setup_logging(stderr=False):
     log_dir = get_logs_dir()
     logger.remove()
     logger.add(log_dir / "tinyagent.log", rotation="1 day", retention="7 days")
-    # Always output ERROR level and above to stderr
     logger.add(lambda msg: print(msg, end=""), level="ERROR")
     if stderr:
         logger.add(lambda msg: print(msg, end=""), filter=lambda rec: rec["level"].name != "DEBUG")
@@ -141,6 +138,10 @@ def _run_agent(
     ws_path = _init_workspace(cfg, workspace)
     cfg.agent.workspace = str(ws_path)
 
+    from tinyagent.agent import _make_crash_handler
+    import sys
+    sys.excepthook = _make_crash_handler(ws_path)
+
     agent = Agent(cfg, ws_path, enable_cron=enable_cron)
 
     if channel in cfg.channel.instances:
@@ -177,8 +178,8 @@ def _run_agent(
 
 
 def _guard_running() -> bool:
-    import subprocess
     import os
+    import subprocess
     my_pid = os.getpid()
     r = subprocess.run(["pgrep", "-f", "tinyagent_guard"], capture_output=True, text=True)
     if r.returncode != 0:
