@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import json
 import logging
 import os
@@ -97,7 +96,7 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
-    def _cmd_new(self, msg: InboundMessage) -> OutboundMessage:
+    async def _cmd_new(self, msg: InboundMessage) -> OutboundMessage:
         session = self.sessions.get_or_create(msg.session_key)
         snapshot = session.messages[session.last_consolidated:]
         session.clear()
@@ -107,15 +106,15 @@ class AgentLoop:
             self._schedule_background(self.memory_consolidator.archive_messages(snapshot))
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="New session started.")
 
-    def _cmd_debug_on(self, msg: InboundMessage) -> OutboundMessage:
+    async def _cmd_debug_on(self, msg: InboundMessage) -> OutboundMessage:
         logging.getLogger("httpx").setLevel(logging.DEBUG)
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="httpx debug logging enabled.")
 
-    def _cmd_debug_off(self, msg: InboundMessage) -> OutboundMessage:
+    async def _cmd_debug_off(self, msg: InboundMessage) -> OutboundMessage:
         logging.getLogger("httpx").setLevel(logging.WARNING)
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="httpx debug logging disabled.")
 
-    def _cmd_help(self, msg: InboundMessage) -> OutboundMessage:
+    async def _cmd_help(self, msg: InboundMessage) -> OutboundMessage:
         lines = [
             "/new — Start a new conversation",
             "/stop — Stop the current task",
@@ -289,10 +288,7 @@ class AgentLoop:
 
             cmd = msg.content.strip().lower()
             if handler := self._COMMAND_HANDLERS.get(cmd):
-                if inspect.iscoroutinefunction(handler):
-                    response = await handler(self, msg)
-                else:
-                    response = handler(self, msg)
+                response = await handler(self, msg)
                 if response:
                     await self.bus.outbound.put(response)
             else:
