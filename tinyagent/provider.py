@@ -1,9 +1,5 @@
 import asyncio
-import hashlib
-import json
 import os
-import secrets
-import string
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -78,14 +74,6 @@ def find_provider_by_name(name: str) -> ProviderSpec | None:
     return None
 
 
-_ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
-_ALNUM = string.ascii_letters + string.digits
-
-
-def _short_tool_id() -> str:
-    return "".join(secrets.choice(_ALNUM) for _ in range(9))
-
-
 class LLMProvider:
     _CHAT_RETRY_DELAYS = (1, 2, 4)
     _TRANSIENT_ERROR_MARKERS = (
@@ -150,46 +138,6 @@ class LLMProvider:
                 kwargs["base_url"] = self.api_base
             self._client = Anthropic(**kwargs)
         return self._client
-
-    @staticmethod
-    def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        def _clean_content(msg: dict) -> dict:
-            content = msg.get("content")
-            if isinstance(content, str) and not content:
-                return {**msg, "content": None if (msg.get("role") == "assistant" and msg.get("tool_calls")) else "(empty)"}
-            if isinstance(content, list):
-                return {**msg, "content": LLMProvider._filter_list_content(msg, content)}
-            if isinstance(content, dict):
-                return {**msg, "content": [content]}
-            return msg
-        return [_clean_content(m) for m in messages]
-
-    @staticmethod
-    def _filter_list_content(msg: dict, content: list) -> str | list | None:
-        filtered = [
-            item for item in content
-            if not (isinstance(item, dict) and item.get("type") in ("text", "input_text", "output_text") and not item.get("text"))
-        ]
-        if len(filtered) == len(content):
-            return content
-        if filtered:
-            return filtered
-        if msg.get("role") == "assistant" and msg.get("tool_calls"):
-            return None
-        return "(empty)"
-
-    @staticmethod
-    def _sanitize_request_messages(
-        messages: list[dict[str, Any]],
-        allowed_keys: frozenset[str],
-    ) -> list[dict[str, Any]]:
-        sanitized = []
-        for msg in messages:
-            clean = {k: v for k, v in msg.items() if k in allowed_keys}
-            if clean.get("role") == "assistant" and "content" not in clean:
-                clean["content"] = None
-            sanitized.append(clean)
-        return sanitized
 
     @classmethod
     def _matches_markers(cls, content: str | None, markers: tuple[str, ...]) -> bool:
