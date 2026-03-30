@@ -23,6 +23,11 @@ class LLMResponse:
     finish_reason: str = "stop"
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_content: str | None = None
+    thinking_blocks: list[dict] | None = None
+
+    @property
+    def has_tool_calls(self) -> bool:
+        return bool(self.tool_calls)
 
 
 class LLMProvider:
@@ -83,7 +88,10 @@ class LLMProvider:
                 kwargs["tool_choice"] = {"type": "auto"}
 
         if reasoning_effort or self.reasoning_effort:
-            kwargs["thinking"] = {"type": "enabled", "budget_tokens": 4096}
+            effective_max = max_tokens or self.max_tokens
+            budget = min(4096, effective_max - 1)
+            if budget >= 1024:
+                kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
 
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(None, lambda: self._client.messages.create(**kwargs))
@@ -91,12 +99,14 @@ class LLMProvider:
         content = None
         reasoning = None
         tool_calls = []
+        thinking_blocks: list[dict] = []
 
         for block in response.content:
             if block.type == "text":
                 content = block.text
             elif block.type == "thinking":
                 reasoning = block.thinking
+                thinking_blocks.append({"type": "thinking", "thinking": block.thinking})
             elif block.type == "tool_use":
                 tool_calls.append(ToolCallRequest(id=block.id, name=block.name, arguments=block.input))
 
@@ -105,6 +115,7 @@ class LLMProvider:
             tool_calls=tool_calls,
             finish_reason="tool_calls" if tool_calls else "stop",
             reasoning_content=reasoning,
+            thinking_blocks=thinking_blocks or None,
         )
 
     async def chat_with_retry(self, **kwargs) -> LLMResponse:

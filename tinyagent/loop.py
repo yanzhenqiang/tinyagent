@@ -353,7 +353,7 @@ class AgentLoop:
 
         cmd = msg.content.strip().lower()
         if handler := self._COMMAND_HANDLERS.get(cmd):
-            return handler(self, msg, session)
+            return handler(self, msg)
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))

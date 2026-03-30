@@ -9,6 +9,7 @@ class SkillsLoader:
     def __init__(self, workspace: Path):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
+        self.builtin_skills: Path | None = None
 
     def list_skills(self) -> list[dict[str, str]]:
         skills = []
@@ -56,6 +57,7 @@ class SkillsLoader:
             name = escape_xml(s["name"])
             path = s["path"]
             desc = escape_xml(self._get_skill_description(s["name"]))
+            lines.append("  <skill>")
             lines.append(f"    <name>{name}</name>")
             lines.append(f"    <description>{desc}</description>")
             lines.append(f"    <location>{path}</location>")
@@ -80,7 +82,7 @@ class SkillsLoader:
     def _parse_tinyagent_metadata(self, raw: str) -> dict:
         try:
             data = json.loads(raw)
-            return data.get("openclaw", {}) if isinstance(data, dict) else {}
+            return data.get("tinyagent", {}) if isinstance(data, dict) else {}
         except (json.JSONDecodeError, TypeError):
             return {}
 
