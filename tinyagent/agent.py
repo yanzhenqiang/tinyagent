@@ -57,13 +57,10 @@ class Agent:
             model=config.agent.model,
             max_iterations=config.agent.max_tool_iterations,
             context_window_tokens=config.agent.context_window_tokens,
-            web_search_config=config.tools.web.search,
-            web_proxy=config.tools.web.proxy or None,
             exec_config=config.tools.exec,
             cron_service=self.cron,
             restrict_to_workspace=config.tools.restrict_to_workspace,
             session_manager=self.session_manager,
-            mcp_servers=config.tools.mcp_servers,
             channel_config=config.channel,
         )
 
@@ -100,5 +97,4 @@ class Agent:
         if self.cron:
             self.cron.stop()
         self.loop.stop()
-        await self.loop.close_mcp()
         logger.info("Agent stopped")

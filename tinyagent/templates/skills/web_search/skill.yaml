@@ -1,0 +1,24 @@
+name: web_search
+version: 1.0.0
+description: Search the web using various providers
+tool: tool.py
+config:
+  provider: brave
+  api_key: null
+  proxy: null
+schema:
+  name: web_search
+  description: Search the web. Returns titles, URLs, and snippets.
+  input_schema:
+    type: object
+    properties:
+      query:
+        type: string
+        description: Search query
+      count:
+        type: integer
+        description: Results (1-10)
+        minimum: 1
+        maximum: 10
+    required:
+      - query

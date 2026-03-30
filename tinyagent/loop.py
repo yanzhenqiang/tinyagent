@@ -5,7 +5,6 @@ import os
 import re
 import sys
 import traceback
-from contextlib import AsyncExitStack
 from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -13,18 +12,17 @@ from typing import Awaitable, Callable
 from loguru import logger
 
 from tinyagent.bus import InboundMessage, MessageBus, OutboundMessage
-from tinyagent.config import ChannelConfig, ExecToolConfig, WebSearchConfig
+from tinyagent.config import ChannelConfig, ExecToolConfig
 from tinyagent.context import ContextBuilder
 from tinyagent.cron_service import CronService
 from tinyagent.memory import MemoryConsolidator
 from tinyagent.provider import LLMProvider
 from tinyagent.session import Session, SessionManager
+from tinyagent.skills.loader import load_skills_from_path
 from tinyagent.tools.cron import CronTool
-from tinyagent.tools.mcp import connect_mcp_servers
 from tinyagent.tools.message import MessageTool
 from tinyagent.tools.registry import ToolRegistry
 from tinyagent.tools.shell import ExecTool
-from tinyagent.tools.web import WebFetchTool, WebSearchTool
 
 
 class AgentLoop:
@@ -38,14 +36,12 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 40,
         context_window_tokens: int = 65_536,
-        web_search_config: WebSearchConfig | None = None,
-        web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
-        mcp_servers: dict | None = None,
         channel_config: ChannelConfig | None = None,
+        skills_path: Path | None = None,
     ):
 
         self.bus = bus
@@ -55,8 +51,6 @@ class AgentLoop:
         self.model = model
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
-        self.web_search_config = web_search_config or WebSearchConfig()
-        self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -66,10 +60,6 @@ class AgentLoop:
         self.tools = ToolRegistry()
 
         self._running = False
-        self._mcp_servers = mcp_servers or {}
-        self._mcp_stack: AsyncExitStack | None = None
-        self._mcp_connected = False
-        self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}
         self._background_tasks: list[asyncio.Task] = []
         self._processing_lock = asyncio.Lock()
@@ -83,6 +73,16 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
         )
         self._register_default_tools()
+        self._load_skills(skills_path)
+
+    def _load_skills(self, skills_path: Path | None) -> None:
+        """Load skills from the given path."""
+        if skills_path is None:
+            return
+        from tinyagent.skills.loader import load_skills_from_path
+        skills = load_skills_from_path(skills_path)
+        for skill in skills:
+            self.tools.register(skill)
 
     def _register_default_tools(self) -> None:
         self.tools.register(ExecTool(
@@ -91,8 +91,6 @@ class AgentLoop:
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
         ))
-        self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
-        self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.outbound.put))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
@@ -158,26 +156,6 @@ class AgentLoop:
         "/debug_off": _cmd_debug_off,
         "/help": _cmd_help,
     }
-
-    async def _connect_mcp(self) -> None:
-        if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
-            return
-        self._mcp_connecting = True
-        try:
-            self._mcp_stack = AsyncExitStack()
-            await self._mcp_stack.__aenter__()
-            await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
-            self._mcp_connected = True
-        except BaseException as e:
-            logger.error("Failed to connect MCP servers (will retry next message): {}", e)
-            if self._mcp_stack:
-                try:
-                    await self._mcp_stack.aclose()
-                except Exception:
-                    pass
-                self._mcp_stack = None
-        finally:
-            self._mcp_connecting = False
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         for name in ("message", "spawn", "cron"):
@@ -274,7 +252,6 @@ class AgentLoop:
     async def run(self) -> None:
         self._running = True
         asyncio.get_event_loop().set_exception_handler(self._handle_exception)
-        await self._connect_mcp()
         logger.info("Agent loop started")
 
         while self._running:
@@ -328,16 +305,10 @@ class AgentLoop:
                 crash_file.write_text(f"Crash at {datetime.now().isoformat()}\n\n{crash_info}")
                 raise
 
-    async def close_mcp(self) -> None:
+    async def _cleanup_background_tasks(self) -> None:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
-        if self._mcp_stack:
-            try:
-                await self._mcp_stack.aclose()
-            except (RuntimeError, BaseExceptionGroup):
-                pass  # MCP SDK cancel scope cleanup is noisy but harmless
-            self._mcp_stack = None
 
     def _schedule_background(self, coro) -> None:
         task = asyncio.create_task(coro)

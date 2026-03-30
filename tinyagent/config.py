@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -53,39 +52,14 @@ class GatewayConfig(Base):
     port: int = 18790
 
 
-class WebSearchConfig(Base):
-    provider: str = "brave"
-    api_key: str = ""
-    base_url: str = ""
-    max_results: int = 5
-
-
-class WebToolsConfig(Base):
-    proxy: str | None = None
-    search: WebSearchConfig = Field(default_factory=WebSearchConfig)
-
-
 class ExecToolConfig(Base):
     timeout: int = 60
     path_append: str = ""
 
 
-class MCPServerConfig(Base):
-    type: Literal["stdio", "sse", "streamableHttp"] | None = None
-    command: str = ""
-    args: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
-    url: str = ""
-    headers: dict[str, str] = Field(default_factory=dict)
-    tool_timeout: int = 30
-    enabled_tools: list[str] = Field(default_factory=lambda: ["*"])
-
-
 class ToolsConfig(Base):
-    web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False
-    mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
 class Config(BaseSettings):
