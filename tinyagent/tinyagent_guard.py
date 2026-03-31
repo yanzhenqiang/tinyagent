@@ -45,7 +45,7 @@ def rollback(code_path: str, log_file: str) -> str:
         log(log_file, "rollback_fail", "not a git repo")
         return "error:not_git"
 
-    sha_from = r.stdout.strip()[:8]
+    sha_from = r.stdout.strip()
 
     subprocess.run(
         ["git", "reset", "--hard", "HEAD~1"],
@@ -61,7 +61,7 @@ def rollback(code_path: str, log_file: str) -> str:
         text=True,
         check=True,
     )
-    sha_to = r.stdout.strip()[:8]
+    sha_to = r.stdout.strip()
 
     return f"{sha_from} -> {sha_to}"
 
