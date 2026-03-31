@@ -18,6 +18,7 @@ from tinyagent.context import ContextBuilder
 from tinyagent.cron_service import CronService
 from tinyagent.memory import MemoryConsolidator
 from tinyagent.provider import LLMProvider
+from tinyagent.replay_engine import ReplayEngine
 from tinyagent.session import Session, SessionManager
 from tinyagent.tools.cron import CronTool
 from tinyagent.tools.message import MessageTool
@@ -113,6 +114,9 @@ class AgentLoop:
             "/debug_off — Disable httpx debug logging",
             "/context log — Show recent LLM interaction history",
             "/context show <id> — Show detailed context for an interaction",
+            "/replay <n> — Replay conversation from turn n",
+            "/replayandmodify <n> <real|fake> — Replay with modification",
+            "/verifytrace <id1> <id2> — Compare two traces",
             "/help — Show available commands",
         ]
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
@@ -198,6 +202,231 @@ class AgentLoop:
                 return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"Context `{ctx_id}` not found.")
 
+    async def _cmd_replay(self, msg: InboundMessage) -> OutboundMessage:
+        """Replay conversation from a specific turn."""
+        parts = msg.content.strip().split()
+        if len(parts) < 2:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Usage: /replay <n> - Replay from turn n"
+            )
+        try:
+            n = int(parts[1])
+        except ValueError:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Invalid turn number: {parts[1]}"
+            )
+
+        try:
+            from tinyagent.replay_engine import ReplayEngine
+            engine = ReplayEngine(self.workspace, self.provider)
+            replay = await engine.run_replay(
+                source_key=msg.session_key,
+                fork_point=n,
+                mode="normal"
+            )
+
+            lines = [
+                f"🔄 Replay from turn {n}",
+                f"",
+                f"Replay ID: `{replay.id}`",
+                f"Fork Point: {replay.fork_point}",
+                f"Mode: {replay.mode}",
+                f"",
+                f"📊 Comparison:",
+                f"  Equivalent: {'✓ Yes' if replay.comparison.equivalent else '✗ No'}",
+                f"  Confidence: {replay.comparison.confidence}%",
+                f"  System: {'✓' if replay.comparison.system_match else '✗'}",
+                f"  Messages: {'✓' if replay.comparison.messages_match else '✗'}",
+                f"  Tools: {'✓' if replay.comparison.tools_match else '✗'}",
+                f"",
+                f"📝 Reasoning:",
+                f"  {replay.comparison.reasoning}",
+            ]
+
+            if replay.comparison.differences:
+                lines.extend([f"", f"🔍 Differences:"])
+                for diff in replay.comparison.differences:
+                    lines.append(f"  - {diff}")
+
+            lines.extend([f"", f"Use `/verifytrace {replay.id}` to view full traces."])
+
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="\n".join(lines)
+            )
+        except Exception as e:
+            logger.error("Replay failed: {}", e)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Replay failed: {str(e)}"
+            )
+
+    async def _cmd_replay_and_modify(self, msg: InboundMessage) -> OutboundMessage:
+        """Replay with modification (real/fake mode)."""
+        parts = msg.content.strip().split()
+        if len(parts) < 3:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Usage: /replayandmodify <n> <real|fake>"
+            )
+
+        try:
+            n = int(parts[1])
+        except ValueError:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Invalid turn number: {parts[1]}"
+            )
+
+        mode = parts[2].lower()
+        if mode not in ("real", "fake"):
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Invalid mode: {mode}. Use 'real' or 'fake'."
+            )
+
+        try:
+            from tinyagent.replay_engine import ReplayEngine
+            engine = ReplayEngine(self.workspace, self.provider)
+            replay = await engine.run_replay(
+                source_key=msg.session_key,
+                fork_point=n,
+                mode=mode
+            )
+
+            lines = [
+                f"🔄 Replay with modification (mode: {mode})",
+                f"",
+                f"Replay ID: `{replay.id}`",
+                f"Fork Point: {replay.fork_point}",
+                f"",
+            ]
+
+            if replay.modification:
+                lines.extend([
+                    f"🔧 Modification Applied:",
+                    f"  Type: {replay.modification.get('type', 'unknown')}",
+                ])
+                if 'description' in replay.modification:
+                    lines.append(f"  Description: {replay.modification['description']}")
+                if 'original' in replay.modification:
+                    orig = replay.modification['original'][:50] if len(replay.modification['original']) > 50 else replay.modification['original']
+                    mod = replay.modification['modified'][:50] if len(replay.modification['modified']) > 50 else replay.modification['modified']
+                    lines.append(f"  Original: {orig}...")
+                    lines.append(f"  Modified: {mod}...")
+
+            lines.extend([
+                f"",
+                f"📊 Comparison:",
+                f"  Equivalent: {'✓ Yes' if replay.comparison.equivalent else '✗ No'}",
+                f"  Confidence: {replay.comparison.confidence}%",
+                f"",
+                f"Expected: {'Consistent (fake mode)' if mode == 'fake' else 'Different (real mode)'}",
+                f"Actual: {'Consistent' if replay.comparison.equivalent else 'Different'}",
+                f"Result: {'✓ PASS' if (mode == 'fake' and replay.comparison.equivalent) or (mode == 'real' and not replay.comparison.equivalent) else '✗ FAIL'}",
+                f"",
+                f"📝 Reasoning:",
+                f"  {replay.comparison.reasoning}",
+            ])
+
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="\n".join(lines)
+            )
+        except Exception as e:
+            logger.error("Replay and modify failed: {}", e)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Replay failed: {str(e)}"
+            )
+
+    async def _cmd_verify_trace(self, msg: InboundMessage) -> OutboundMessage:
+        """Verify/compare two traces."""
+        parts = msg.content.strip().split()
+        if len(parts) < 3:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Usage: /verifytrace <id1> <id2>"
+            )
+
+        id1, id2 = parts[1], parts[2]
+
+        try:
+            from tinyagent.replay_engine import ReplayEngine
+            engine = ReplayEngine(self.workspace, self.provider)
+            replay1 = engine.load_replay(id1)
+            replay2 = engine.load_replay(id2)
+
+            if not replay1:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=f"Replay `{id1}` not found."
+                )
+            if not replay2:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=f"Replay `{id2}` not found."
+                )
+
+            # Compare the two traces
+            comparison = await engine.comparator.judge_with_llm(
+                replay1.original_trace,
+                replay2.original_trace
+            )
+
+            lines = [
+                f"🔍 Comparing Traces",
+                f"",
+                f"Trace 1: `{id1}`",
+                f"  Source: {replay1.source_session}",
+                f"  Fork Point: {replay1.fork_point}",
+                f"  Messages: {len(replay1.original_trace.messages)}",
+                f"",
+                f"Trace 2: `{id2}`",
+                f"  Source: {replay2.source_session}",
+                f"  Fork Point: {replay2.fork_point}",
+                f"  Messages: {len(replay2.original_trace.messages)}",
+                f"",
+                f"📊 Verdict:",
+                f"  Equivalent: {'✓ Yes' if comparison.equivalent else '✗ No'}",
+                f"  Confidence: {comparison.confidence}%",
+                f"",
+                f"📝 Reasoning:",
+                f"  {comparison.reasoning}",
+            ]
+
+            if comparison.differences:
+                lines.extend([f"", f"🔍 Differences:"])
+                for diff in comparison.differences:
+                    lines.append(f"  - {diff}")
+
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="\n".join(lines)
+            )
+        except Exception as e:
+            logger.error("Verify trace failed: {}", e)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Verify failed: {str(e)}"
+            )
+
     _COMMAND_HANDLERS = {
         "/new": _cmd_new,
         "/stop": _cmd_stop,
@@ -208,6 +437,9 @@ class AgentLoop:
         "/help": _cmd_help,
         "/context log": _cmd_context_log,
         "/context show": _cmd_context_show,
+        "/replay": _cmd_replay,
+        "/replayandmodify": _cmd_replay_and_modify,
+        "/verifytrace": _cmd_verify_trace,
     }
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
