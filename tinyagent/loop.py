@@ -238,17 +238,33 @@ class AgentLoop:
         for msg in messages:
             content = msg.get("content", "")
             role = msg.get("role", "")
+
+            # Detect tool messages: role=user with tool_result content
+            is_tool = False
+            if role == "user" and isinstance(content, list):
+                if any(item.get("type") == "tool_result" for item in content if isinstance(item, dict)):
+                    is_tool = True
+
             if isinstance(content, str):
                 size = len(content)
             elif isinstance(content, list):
-                size = sum(len(str(item.get("text", ""))) for item in content if isinstance(item, dict))
+                # For tool messages, count the result content size
+                if is_tool:
+                    size = sum(
+                        len(str(item.get("content", "")))
+                        for item in content
+                        if isinstance(item, dict) and item.get("type") == "tool_result"
+                    )
+                else:
+                    size = sum(len(str(item.get("text", ""))) for item in content if isinstance(item, dict))
             else:
                 size = len(str(content))
+
             sizes["total"] += size
-            if role in sizes:
-                sizes[role] += size
-            elif role == "tool":
+            if is_tool:
                 sizes["tool"] += size
+            elif role in sizes:
+                sizes[role] += size
         return sizes
 
     def _context_history_file(self) -> Path:
