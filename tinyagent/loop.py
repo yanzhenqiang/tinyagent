@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -62,6 +63,7 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}
         self._background_tasks: list[asyncio.Task] = []
         self._processing_lock = asyncio.Lock()
+        self._context_history: list[dict] = self._load_context_history()
         self.memory_consolidator = MemoryConsolidator(
             workspace=workspace,
             provider=provider,
@@ -109,6 +111,8 @@ class AgentLoop:
             "/restart — Restart the bot",
             "/debug_on — Enable httpx debug logging",
             "/debug_off — Disable httpx debug logging",
+            "/context log — Show recent LLM interaction history",
+            "/context show <id> — Show detailed context for an interaction",
             "/help — Show available commands",
         ]
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
@@ -136,6 +140,63 @@ class AgentLoop:
         lines = ["🐍 tinyagent Status\n", f"Model: {self.model}"]
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
 
+    async def _cmd_context_log(self, msg: InboundMessage) -> OutboundMessage:
+        """List recent LLM interaction history."""
+        history = self._load_context_history()
+        if not history:
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="No context history yet.")
+        lines = ["📜 Context History (recent 10)\n"]
+        for ctx in history[-10:]:
+            sizes = ctx["sizes"]
+            line = (
+                f"`{ctx['id']}` | "
+                f"sys:{sizes.get('system', 0)} usr:{sizes.get('user', 0)} "
+                f"ast:{sizes.get('assistant', 0)} tool:{sizes.get('tool', 0)} "
+                f"total:{sizes.get('total', 0)} | "
+                f"msgs:{ctx['message_count']}"
+            )
+            if ctx.get("preview"):
+                preview = ctx["preview"][:40] + "..." if len(ctx["preview"]) > 40 else ctx["preview"]
+                line += f" | {preview}"
+            lines.append(line)
+        lines.append("\nUse `/context show <id>` to view details.")
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
+
+    async def _cmd_context_show(self, msg: InboundMessage) -> OutboundMessage:
+        """Show detailed context for a specific id."""
+        parts = msg.content.strip().split(maxsplit=2)
+        if len(parts) < 3:
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Usage: /context show <id>")
+        ctx_id = parts[2].strip()
+        history = self._load_context_history()
+        for ctx in history:
+            if ctx["id"] == ctx_id:
+                sizes = ctx["sizes"]
+                lines = [
+                    f"📋 Context Detail: `{ctx_id}`",
+                    f"Time: {ctx['timestamp']}",
+                    f"Messages: {ctx['message_count']}",
+                    "",
+                    "📊 Size Breakdown:",
+                    f"  System: {sizes.get('system', 0)} chars",
+                    f"  User: {sizes.get('user', 0)} chars",
+                    f"  Assistant: {sizes.get('assistant', 0)} chars",
+                    f"  Tool: {sizes.get('tool', 0)} chars",
+                    f"  Total: {sizes.get('total', 0)} chars",
+                    "",
+                    "📝 Messages:",
+                ]
+                for i, m in enumerate(ctx["messages"], 1):
+                    role = m.get("role", "?")
+                    content = m.get("content", "")
+                    if isinstance(content, list):
+                        content = str(content)[:200]
+                    else:
+                        content = str(content)[:200]
+                    lines.append(f"  [{i}] {role}: {content}...")
+                return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=f"Context `{ctx_id}` not found.")
+
     _COMMAND_HANDLERS = {
         "/new": _cmd_new,
         "/stop": _cmd_stop,
@@ -144,6 +205,8 @@ class AgentLoop:
         "/debug_on": _cmd_debug_on,
         "/debug_off": _cmd_debug_off,
         "/help": _cmd_help,
+        "/context log": _cmd_context_log,
+        "/context show": _cmd_context_show,
     }
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
@@ -168,6 +231,72 @@ class AgentLoop:
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
+
+    def _calc_messages_size(self, messages: list[dict]) -> dict[str, int]:
+        """Calculate token sizes for different parts of messages."""
+        sizes = {"system": 0, "user": 0, "assistant": 0, "tool": 0, "total": 0}
+        for msg in messages:
+            content = msg.get("content", "")
+            role = msg.get("role", "")
+            if isinstance(content, str):
+                size = len(content)
+            elif isinstance(content, list):
+                size = sum(len(str(item.get("text", ""))) for item in content if isinstance(item, dict))
+            else:
+                size = len(str(content))
+            sizes["total"] += size
+            if role in sizes:
+                sizes[role] += size
+            elif role == "tool":
+                sizes["tool"] += size
+        return sizes
+
+    def _context_history_file(self) -> Path:
+        return self.workspace / "context_history.jsonl"
+
+    def _load_context_history(self) -> list[dict]:
+        history_file = self._context_history_file()
+        if not history_file.exists():
+            return []
+        history = []
+        with open(history_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        history.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        return history[-50:]  # Keep last 50 entries
+
+    def _save_context_history(self, history: list[dict]) -> None:
+        history_file = self._context_history_file()
+        history_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(history_file, "w", encoding="utf-8") as f:
+            for entry in history[-50:]:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    def _record_context(self, messages: list[dict], response_content: str | None = None) -> str:
+        """Record context to history and return sha-like id."""
+        sizes = self._calc_messages_size(messages)
+        context_data = {
+            "timestamp": datetime.now().isoformat(),
+            "sizes": sizes,
+            "message_count": len(messages),
+            "preview": response_content[:200] if response_content else None,
+            "messages": messages,
+        }
+        sha = hashlib.sha256(json.dumps(context_data["timestamp"]).encode()).hexdigest()[:8]
+        context_data["id"] = sha
+
+        # Load existing history, append new entry, save back
+        history = self._load_context_history()
+        history.append(context_data)
+        self._save_context_history(history)
+
+        # Update in-memory cache
+        self._context_history = history
+        return sha
 
     async def _run_agent_loop(
         self,
@@ -229,6 +358,7 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
+        self._record_context(messages, final_content)
         return final_content, tools_used, messages
 
     def _handle_exception(self, _loop, context):
@@ -248,7 +378,14 @@ class AgentLoop:
                 msg = await asyncio.wait_for(self.bus.inbound.get(), timeout=1.0)
 
                 cmd = msg.content.strip().lower()
-                if handler := self._COMMAND_HANDLERS.get(cmd):
+                # Check exact match first, then prefix match for commands with args
+                handler = self._COMMAND_HANDLERS.get(cmd)
+                if not handler:
+                    for cmd_key, h in self._COMMAND_HANDLERS.items():
+                        if cmd.startswith(cmd_key + " "):
+                            handler = h
+                            break
+                if handler:
                     response = await handler(self, msg)
                     if response:
                         await self.bus.outbound.put(response)
@@ -341,7 +478,14 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         cmd = msg.content.strip().lower()
-        if handler := self._COMMAND_HANDLERS.get(cmd):
+        # Check exact match first, then prefix match for commands with args
+        handler = self._COMMAND_HANDLERS.get(cmd)
+        if not handler:
+            for cmd_key, h in self._COMMAND_HANDLERS.items():
+                if cmd.startswith(cmd_key + " "):
+                    handler = h
+                    break
+        if handler:
             return handler(self, msg)
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
