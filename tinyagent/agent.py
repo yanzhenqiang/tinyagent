@@ -80,10 +80,14 @@ class Agent:
         logger.info("Agent started")
 
     def _on_loop_done(self, task):
-        if task.exception():
-            logger.error("Agent loop crashed: {}", task.exception())
-            import sys
-            sys.exit(1)
+        try:
+            exc = task.exception()
+            if exc and not isinstance(exc, asyncio.CancelledError):
+                logger.error("Agent loop crashed: {}", exc)
+                import sys
+                sys.exit(1)
+        except asyncio.CancelledError:
+            pass
 
     async def stop(self) -> None:
         if not self._running:

@@ -18,7 +18,6 @@ from tinyagent.cron_service import CronService
 from tinyagent.memory import MemoryConsolidator
 from tinyagent.provider import LLMProvider
 from tinyagent.session import Session, SessionManager
-from tinyagent.skills.loader import load_skills_from_path
 from tinyagent.tools.cron import CronTool
 from tinyagent.tools.message import MessageTool
 from tinyagent.tools.registry import ToolRegistry
@@ -73,16 +72,6 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
         )
         self._register_default_tools()
-        self._load_skills(skills_path)
-
-    def _load_skills(self, skills_path: Path | None) -> None:
-        """Load skills from the given path."""
-        if skills_path is None:
-            return
-        from tinyagent.skills.loader import load_skills_from_path
-        skills = load_skills_from_path(skills_path)
-        for skill in skills:
-            self.tools.register(skill)
 
     def _register_default_tools(self) -> None:
         self.tools.register(ExecTool(

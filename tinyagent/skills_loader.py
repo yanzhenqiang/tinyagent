@@ -9,7 +9,6 @@ class SkillsLoader:
     def __init__(self, workspace: Path):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
-        self.builtin_skills: Path | None = None
 
     def list_skills(self) -> list[dict[str, str]]:
         skills = []
@@ -25,10 +24,6 @@ class SkillsLoader:
         workspace_skill = self.workspace_skills / name / "SKILL.md"
         if workspace_skill.exists():
             return workspace_skill.read_text(encoding="utf-8")
-        if self.builtin_skills:
-            builtin_skill = self.builtin_skills / name / "SKILL.md"
-            if builtin_skill.exists():
-                return builtin_skill.read_text(encoding="utf-8")
         return None
 
     def load_skills_for_context(self) -> str:

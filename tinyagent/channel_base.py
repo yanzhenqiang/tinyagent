@@ -54,6 +54,7 @@ class BaseChannel(ABC):
 
     async def start(self) -> None:
         self._running = True
+        dispatch_task = asyncio.create_task(self._dispatch_outbound())
         if self._content:
             await self._handle_message(sender_id="user", chat_id=self._chat_id, content=self._content)
             try:
@@ -61,7 +62,7 @@ class BaseChannel(ABC):
             except asyncio.TimeoutError:
                 pass
             self._running = False
-        await self._dispatch_outbound()
+        await dispatch_task
 
     async def stop(self) -> None:
         self._running = False
