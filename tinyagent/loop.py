@@ -152,7 +152,7 @@ class AgentLoop:
                 f"`{ctx['id']}` | "
                 f"sys:{sizes.get('system', 0)} usr:{sizes.get('user', 0)} "
                 f"ast:{sizes.get('assistant', 0)} tool:{sizes.get('tool', 0)} "
-                f"total:{sizes.get('total', 0)} | "
+                f"skills:{sizes.get('skills', 0)} total:{sizes.get('total', 0)} | "
                 f"msgs:{ctx['message_count']}"
             )
             if ctx.get("preview"):
@@ -179,6 +179,7 @@ class AgentLoop:
                     "",
                     "📊 Size Breakdown:",
                     f"  System: {sizes.get('system', 0)} chars",
+                    f"  Skills: {sizes.get('skills', 0)} chars",
                     f"  User: {sizes.get('user', 0)} chars",
                     f"  Assistant: {sizes.get('assistant', 0)} chars",
                     f"  Tool: {sizes.get('tool', 0)} chars",
@@ -232,9 +233,38 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    def _extract_skills_size(self, system_content: str) -> int:
+        """Extract skills section size from system prompt."""
+        if "# Skills" in system_content:
+            # Find the skills section
+            skills_start = system_content.find("# Skills")
+            # Find the end of skills section (next --- or end of content)
+            skills_end = system_content.find("\n\n---\n\n", skills_start)
+            if skills_end == -1:
+                skills_content = system_content[skills_start:]
+            else:
+                skills_content = system_content[skills_start:skills_end]
+            return len(skills_content)
+        # Check for Active Skills section
+        if "# Active Skills" in system_content:
+            active_start = system_content.find("# Active Skills")
+            # Active Skills section might be followed by Skills section or ---
+            skills_section = system_content.find("# Skills", active_start)
+            if skills_section != -1:
+                # There's a Skills section after Active Skills
+                active_content = system_content[active_start:skills_section]
+            else:
+                active_end = system_content.find("\n\n---\n\n", active_start)
+                if active_end == -1:
+                    active_content = system_content[active_start:]
+                else:
+                    active_content = system_content[active_start:active_end]
+            return len(active_content)
+        return 0
+
     def _calc_messages_size(self, messages: list[dict]) -> dict[str, int]:
         """Calculate token sizes for different parts of messages."""
-        sizes = {"system": 0, "user": 0, "assistant": 0, "tool": 0, "total": 0}
+        sizes = {"system": 0, "user": 0, "assistant": 0, "tool": 0, "skills": 0, "total": 0}
         for msg in messages:
             content = msg.get("content", "")
             role = msg.get("role", "")
@@ -247,6 +277,12 @@ class AgentLoop:
 
             if isinstance(content, str):
                 size = len(content)
+                # Extract skills size from system prompt
+                if role == "system":
+                    skills_size = self._extract_skills_size(content)
+                    sizes["skills"] += skills_size
+                    # Subtract skills from system to avoid double counting
+                    size = size - skills_size
             elif isinstance(content, list):
                 # For tool messages, count the result content size
                 if is_tool:
@@ -260,7 +296,7 @@ class AgentLoop:
             else:
                 size = len(str(content))
 
-            sizes["total"] += size
+            sizes["total"] += size + sizes.get("skills", 0) if role == "system" else size
             if is_tool:
                 sizes["tool"] += size
             elif role in sizes:
