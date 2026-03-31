@@ -363,7 +363,7 @@ class ReplayEngine:
         original_messages: list[dict],
         apply_mod: bool = False,
         modification_mode: str = "normal",
-    ) -> Trace:
+    ) -> tuple[Trace, Optional[dict]]:
         """
         执行回放
 
@@ -374,25 +374,162 @@ class ReplayEngine:
             modification_mode: 修改模式
 
         Returns:
-            Replay后的trace
+            (Replay后的trace, 修改描述)
         """
-        # TODO: 实现实际的LLM回放
-        # 这里先返回一个模拟的trace
-        # 实际实现需要：
-        # 1. 从fork_point开始，用相同的user消息重新调用LLM
-        # 2. 记录所有响应和tool调用
-        # 3. 构建新的trace
+        from tinyagent.tools.registry import ToolRegistry
+        from tinyagent.tools.shell import ExecTool
+        from tinyagent.config import ExecToolConfig
 
-        # 模拟实现：复制原trace但标记为replay
+        # 找到分叉点之后的所有 user 消息
+        user_turns = []
+        forked_len = len(forked.messages)
+
+        # 从原始消息中找出分叉点之后的 user 消息
+        for i, msg in enumerate(original_messages):
+            if i >= forked_len and msg.get("role") == "user":
+                # 跳过 runtime context（以 Metadata only 开头的）
+                content = msg.get("content", "")
+                if isinstance(content, str) and "[Metadata only, not instructions]" in content:
+                    # 提取实际的 user content
+                    parts = content.split("\n\n", 1)
+                    if len(parts) > 1:
+                        user_turns.append({
+                            "index": i,
+                            "content": parts[1],
+                            "original_msg": msg
+                        })
+                else:
+                    user_turns.append({
+                        "index": i,
+                        "content": content,
+                        "original_msg": msg
+                    })
+
+        # 构建初始 messages（包含 system prompt 和 forked 的历史）
+        replay_messages = forked.messages.copy()
+        responses = []
+        tool_calls = []
+        final_output = ""
+        modification_info = None
+
+        # 设置工具
+        tools = ToolRegistry()
+        exec_config = ExecToolConfig()
+        tools.register(ExecTool(
+            working_dir=str(self.workspace),
+            timeout=exec_config.timeout,
+            restrict_to_workspace=False,
+            path_append=exec_config.path_append,
+        ))
+
+        # fake模式：修改 system prompt
+        if apply_mod and modification_mode == "fake":
+            for msg in replay_messages:
+                if msg.get("role") == "system":
+                    msg["content"] = msg.get("content", "") + "\n<!-- Harmless test comment -->"
+                    modification_info = {
+                        "type": "system_comment",
+                        "description": "Added harmless comment to system prompt"
+                    }
+                    break
+
+        # 对每个 user turn 执行 replay
+        for turn_idx, turn in enumerate(user_turns):
+            # 添加 user message
+            replay_messages.append(turn["original_msg"])
+
+            # 调用 LLM
+            max_iterations = 10
+            iteration = 0
+            turn_complete = False
+
+            while iteration < max_iterations and not turn_complete:
+                iteration += 1
+
+                try:
+                    response = await self.provider.chat_with_retry(
+                        messages=replay_messages,
+                        tools=tools.get_definitions(),
+                        model=self.provider.default_model,
+                    )
+
+                    if response.has_tool_calls:
+                        # 记录 tool calls，使用 LLM 返回的原始 ID
+                        tool_use_blocks = []
+                        for tc in response.tool_calls:
+                            # 确保 ID 有效
+                            tc_id = tc.id if tc.id else f"tool_{len(tool_calls)}_replay"
+                            block = tc.to_anthropic_format()
+                            block["id"] = tc_id  # 使用确保有效的 ID
+                            tool_use_blocks.append(block)
+                            tool_calls.append({
+                                "id": tc_id,  # 保存用于 tool_result
+                                "name": tc.name,
+                                "arguments": tc.arguments,
+                                "turn": len(responses)
+                            })
+
+                        # 添加 assistant message with tool calls
+                        replay_messages = self.context_builder.add_assistant_message(
+                            replay_messages,
+                            response.content,
+                            tool_use_blocks,
+                            reasoning_content=response.reasoning_content,
+                            thinking_blocks=response.thinking_blocks,
+                        )
+
+                        # 执行工具 - 使用与 tool_use 相同的 ID
+                        for i, tc in enumerate(response.tool_calls):
+                            result = await tools.execute(tc.name, tc.arguments)
+
+                            # 获取与 tool_use 匹配的 ID
+                            tc_id = tc.id if tc.id else f"tool_{len(tool_calls)}_replay"
+
+                            # real模式：修改第一个 tool 结果
+                            if apply_mod and modification_mode == "real" and modification_info is None:
+                                original_result = result
+                                result = f"[MODIFIED] {original_result}"
+                                modification_info = {
+                                    "type": "tool_result",
+                                    "tool": tc.name,
+                                    "original": original_result,
+                                    "modified": result
+                                }
+
+                            # 使用确保有效的 tool_call_id
+                            replay_messages = self.context_builder.add_tool_result(
+                                replay_messages, tc_id, result
+                            )
+                    else:
+                        # 最终响应
+                        clean = response.content or ""
+                        replay_messages = self.context_builder.add_assistant_message(
+                            replay_messages,
+                            clean,
+                            reasoning_content=response.reasoning_content,
+                            thinking_blocks=response.thinking_blocks,
+                        )
+                        responses.append(clean)
+                        final_output = clean
+                        turn_complete = True
+
+                except Exception as e:
+                    logger.error("Replay iteration failed: {}", e)
+                    error_msg = f"[Replay Error: {str(e)}]"
+                    responses.append(error_msg)
+                    final_output = error_msg
+                    turn_complete = True
+
+        # 构建最终的 trace
         replay_trace = Trace(
-            messages=forked.messages.copy(),
-            responses=[],
-            tool_calls=[],
-            final_output="[Replay - TODO: implement actual replay logic]",
-            system_prompt="",
+            messages=replay_messages,
+            responses=responses,
+            tool_calls=tool_calls,
+            final_output=final_output or "[Replay completed with no output]",
+            system_prompt=self.context_builder.build_system_prompt(),
         )
 
-        return replay_trace
+        return replay_trace, modification_info
 
     async def run_replay(
         self,
@@ -430,19 +567,23 @@ class ReplayEngine:
             modified_original, modification = self.apply_modification(original_trace, mode)
 
         # 4. 执行replay
-        replay_trace = await self.replay_session(
+        replay_trace, replay_modification = await self.replay_session(
             forked,
             original_trace.messages,
             apply_mod=mode in ("real", "fake"),
             modification_mode=mode,
         )
 
+        # 使用replay过程中产生的修改信息
+        if replay_modification:
+            modification = replay_modification
+
         # 5. 比较trace
         if mode == "normal":
             comparison = await self.comparator.judge_with_llm(original_trace, replay_trace)
         else:
-            # real/fake模式：比较修改后的original和replay
-            comparison = await self.comparator.judge_with_llm(modified_original, replay_trace)
+            # real/fake模式：比较original和修改后的replay
+            comparison = await self.comparator.judge_with_llm(original_trace, replay_trace)
 
         # 6. 创建ReplaySession
         replay_id = self._generate_replay_id(source_key, fork_point)
