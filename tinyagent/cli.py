@@ -100,6 +100,13 @@ def _init_workspace(config: Config, workspace: str | None) -> Path:
             shutil.copytree(templates, ws_path, dirs_exist_ok=True)
     else:
         logger.info("Workspace already exists at {}", ws_path)
+        # Ensure skills directory exists even if workspace was created before
+        skills_path = ws_path / "skills"
+        if not skills_path.exists():
+            templates = files("tinyagent") / "templates" / "skills"
+            if templates.exists():
+                shutil.copytree(templates, skills_path)
+                logger.info("Copied skills to {}", skills_path)
     return ws_path
 
 
