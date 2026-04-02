@@ -259,21 +259,32 @@ class ReplayEngine:
 
         # 复制前 fork_point-1 个消息（保留上下文）
         # 注意：这里的"回合"指的是user-assistant交互对
-        # 需要找到第 fork_point 个user消息的位置
-        user_message_indices = [
+        # 需要找到第 fork_point 个真正的用户输入消息的位置（排除tool_result）
+        def _is_real_user_message(m: dict) -> bool:
+            """判断是否是真正的用户输入消息（不是tool_result）"""
+            if m.get("role") != "user":
+                return False
+            content = m.get("content", "")
+            # 如果content是列表且包含tool_result，则不是真正的用户消息
+            if isinstance(content, list):
+                if any(item.get("type") == "tool_result" for item in content):
+                    return False
+            return True
+
+        real_user_indices = [
             i for i, m in enumerate(source.messages)
-            if m.get("role") == "user"
+            if _is_real_user_message(m)
         ]
 
-        if fork_point > len(user_message_indices):
-            raise ValueError(f"Session only has {len(user_message_indices)} user turns")
+        if fork_point > len(real_user_indices):
+            raise ValueError(f"Session only has {len(real_user_indices)} user turns")
 
-        # 截取到第 fork_point 个user消息之前的所有消息
+        # 截取到第 fork_point 个真实user消息之前的所有消息
         if fork_point == 1:
             # 从最开始，不复制历史
             cutoff = 0
         else:
-            cutoff = user_message_indices[fork_point - 1]
+            cutoff = real_user_indices[fork_point - 1]
 
         forked.messages = source.messages[:cutoff]
         forked.created_at = datetime.now()
@@ -367,6 +378,11 @@ class ReplayEngine:
         """
         执行回放
 
+        核心逻辑：
+        - 人的对话（user消息）作为"强制输入"原样保留
+        - LLM回复重新生成
+        - 工具调用真实执行
+
         Args:
             forked: 分叉后的session
             original_messages: 原始消息序列（用于对比）
@@ -379,31 +395,6 @@ class ReplayEngine:
         from tinyagent.tools.registry import ToolRegistry
         from tinyagent.tools.shell import ExecTool
         from tinyagent.config import ExecToolConfig
-
-        # 找到分叉点之后的所有 user 消息
-        user_turns = []
-        forked_len = len(forked.messages)
-
-        # 从原始消息中找出分叉点之后的 user 消息
-        for i, msg in enumerate(original_messages):
-            if i >= forked_len and msg.get("role") == "user":
-                # 跳过 runtime context（以 Metadata only 开头的）
-                content = msg.get("content", "")
-                if isinstance(content, str) and "[Metadata only, not instructions]" in content:
-                    # 提取实际的 user content
-                    parts = content.split("\n\n", 1)
-                    if len(parts) > 1:
-                        user_turns.append({
-                            "index": i,
-                            "content": parts[1],
-                            "original_msg": msg
-                        })
-                else:
-                    user_turns.append({
-                        "index": i,
-                        "content": content,
-                        "original_msg": msg
-                    })
 
         # 构建初始 messages（包含 system prompt 和 forked 的历史）
         replay_messages = forked.messages.copy()
@@ -433,92 +424,113 @@ class ReplayEngine:
                     }
                     break
 
-        # 对每个 user turn 执行 replay
-        for turn_idx, turn in enumerate(user_turns):
-            # 添加 user message
-            replay_messages.append(turn["original_msg"])
+        # 遍历分叉点之后的原始消息
+        forked_len = len(forked.messages)
+        i = forked_len
 
-            # 调用 LLM
-            max_iterations = 10
-            iteration = 0
-            turn_complete = False
+        while i < len(original_messages):
+            msg = original_messages[i]
+            role = msg.get("role", "")
 
-            while iteration < max_iterations and not turn_complete:
-                iteration += 1
+            if role == "user":
+                # 检查是否是 tool_result（内容格式判断）
+                content = msg.get("content", "")
+                is_tool_result = isinstance(content, list) and any(
+                    item.get("type") == "tool_result" for item in content
+                )
 
-                try:
-                    response = await self.provider.chat_with_retry(
-                        messages=replay_messages,
-                        tools=tools.get_definitions(),
-                        model=self.provider.default_model,
-                    )
+                if is_tool_result:
+                    # Tool result: 由工具执行产生，replay 时通过工具执行重新生成
+                    # 注意：这里不应该直接复制，因为工具会被重新执行
+                    # 但为了保持消息序列正确，我们需要等待当前 turn 的工具执行
+                    pass  # tool result 在 assistant tool_use 后处理
+                else:
+                    # 人的对话：作为强制输入原样添加
+                    replay_messages.append(msg)
 
-                    if response.has_tool_calls:
-                        # 记录 tool calls，使用 LLM 返回的原始 ID
-                        tool_use_blocks = []
-                        for tc in response.tool_calls:
-                            # 确保 ID 有效
-                            tc_id = tc.id if tc.id else f"tool_{len(tool_calls)}_replay"
-                            block = tc.to_anthropic_format()
-                            block["id"] = tc_id  # 使用确保有效的 ID
-                            tool_use_blocks.append(block)
-                            tool_calls.append({
-                                "id": tc_id,  # 保存用于 tool_result
-                                "name": tc.name,
-                                "arguments": tc.arguments,
-                                "turn": len(responses)
-                            })
+                    # 调用 LLM 重新生成回复
+                    max_iterations = 10
+                    iteration = 0
+                    turn_complete = False
 
-                        # 添加 assistant message with tool calls
-                        replay_messages = self.context_builder.add_assistant_message(
-                            replay_messages,
-                            response.content,
-                            tool_use_blocks,
-                            reasoning_content=response.reasoning_content,
-                            thinking_blocks=response.thinking_blocks,
-                        )
+                    while iteration < max_iterations and not turn_complete:
+                        iteration += 1
 
-                        # 执行工具 - 使用与 tool_use 相同的 ID
-                        for i, tc in enumerate(response.tool_calls):
-                            result = await tools.execute(tc.name, tc.arguments)
-
-                            # 获取与 tool_use 匹配的 ID
-                            tc_id = tc.id if tc.id else f"tool_{len(tool_calls)}_replay"
-
-                            # real模式：修改第一个 tool 结果
-                            if apply_mod and modification_mode == "real" and modification_info is None:
-                                original_result = result
-                                result = f"[MODIFIED] {original_result}"
-                                modification_info = {
-                                    "type": "tool_result",
-                                    "tool": tc.name,
-                                    "original": original_result,
-                                    "modified": result
-                                }
-
-                            # 使用确保有效的 tool_call_id
-                            replay_messages = self.context_builder.add_tool_result(
-                                replay_messages, tc_id, result
+                        try:
+                            response = await self.provider.chat_with_retry(
+                                messages=replay_messages,
+                                tools=tools.get_definitions(),
+                                model=self.provider.default_model,
                             )
-                    else:
-                        # 最终响应
-                        clean = response.content or ""
-                        replay_messages = self.context_builder.add_assistant_message(
-                            replay_messages,
-                            clean,
-                            reasoning_content=response.reasoning_content,
-                            thinking_blocks=response.thinking_blocks,
-                        )
-                        responses.append(clean)
-                        final_output = clean
-                        turn_complete = True
 
-                except Exception as e:
-                    logger.error("Replay iteration failed: {}", e)
-                    error_msg = f"[Replay Error: {str(e)}]"
-                    responses.append(error_msg)
-                    final_output = error_msg
-                    turn_complete = True
+                            if response.has_tool_calls:
+                                # 1. 首先构建所有 tool_use blocks
+                                tool_use_blocks = []
+                                tool_results = []  # 暂存 tool results
+
+                                for tc in response.tool_calls:
+                                    tc_id = tc.id if tc.id else f"toolu_{len(tool_calls):08d}"
+                                    block = tc.to_anthropic_format()
+                                    block["id"] = tc_id
+                                    tool_use_blocks.append(block)
+                                    tool_calls.append({
+                                        "id": tc_id,
+                                        "name": tc.name,
+                                        "arguments": tc.arguments,
+                                        "turn": len(responses)
+                                    })
+
+                                    # 执行工具
+                                    result = await tools.execute(tc.name, tc.arguments)
+
+                                    # real模式：修改第一个 tool 结果
+                                    if apply_mod and modification_mode == "real" and modification_info is None:
+                                        original_result = result
+                                        result = f"[MODIFIED] {original_result}"
+                                        modification_info = {
+                                            "type": "tool_result",
+                                            "tool": tc.name,
+                                            "original": original_result,
+                                            "modified": result
+                                        }
+
+                                    tool_results.append((tc_id, result))
+
+                                # 2. 添加 assistant message with tool calls
+                                replay_messages = self.context_builder.add_assistant_message(
+                                    replay_messages,
+                                    response.content,
+                                    tool_use_blocks,
+                                    reasoning_content=response.reasoning_content,
+                                    thinking_blocks=response.thinking_blocks,
+                                )
+
+                                # 3. 添加所有 tool_results
+                                for tc_id, result in tool_results:
+                                    replay_messages = self.context_builder.add_tool_result(
+                                        replay_messages, tc_id, result
+                                    )
+                            else:
+                                # 最终响应
+                                clean = response.content or ""
+                                replay_messages = self.context_builder.add_assistant_message(
+                                    replay_messages,
+                                    clean,
+                                    reasoning_content=response.reasoning_content,
+                                    thinking_blocks=response.thinking_blocks,
+                                )
+                                responses.append(clean)
+                                final_output = clean
+                                turn_complete = True
+
+                        except Exception as e:
+                            logger.error("Replay iteration failed: {}", e)
+                            error_msg = f"[Replay Error: {str(e)}]"
+                            responses.append(error_msg)
+                            final_output = error_msg
+                            turn_complete = True
+
+            i += 1
 
         # 构建最终的 trace
         replay_trace = Trace(
@@ -551,11 +563,32 @@ class ReplayEngine:
         # 1. Fork session
         source, forked = self.fork_session(source_key, fork_point)
 
-        # 2. 构建原trace
+        # 2. 构建原trace - 从历史消息中提取信息
+        original_responses = []
+        original_tool_calls = []
+        for msg in source.messages:
+            if msg.get("role") == "assistant":
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    # 提取 text 类型的内容作为响应
+                    texts = [c.get("text", "") for c in content if c.get("type") == "text"]
+                    if texts:
+                        original_responses.append("".join(texts))
+                    # 提取 tool_use
+                    for c in content:
+                        if c.get("type") == "tool_use":
+                            original_tool_calls.append({
+                                "id": c.get("id", ""),
+                                "name": c.get("name", ""),
+                                "arguments": c.get("input", {}),
+                            })
+                else:
+                    original_responses.append(content)
+
         original_trace = Trace(
             messages=source.messages.copy(),
-            responses=[],  # TODO: 从历史中提取
-            tool_calls=[],  # TODO: 从历史中提取
+            responses=original_responses,
+            tool_calls=original_tool_calls,
             final_output=source.messages[-1].get("content", "") if source.messages else "",
             system_prompt=self.context_builder.build_system_prompt(),
         )

@@ -68,7 +68,14 @@ class LLMProvider:
             if msg.get("role") == "system":
                 system = msg.get("content")
             else:
-                anthropic_messages.append({"role": msg["role"], "content": msg.get("content", "")})
+                # Handle both simple content (str) and structured content (list of blocks)
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    # Structured content (tool_results, etc.) - pass through as-is
+                    anthropic_messages.append({"role": msg["role"], "content": content})
+                else:
+                    # Simple string content
+                    anthropic_messages.append({"role": msg["role"], "content": content})
 
 
         kwargs: dict[str, Any] = {

@@ -322,13 +322,69 @@ pkill -9 -f tinyagent
 
 ---
 
+## 测试8: 复杂多轮任务（Coding Task）
+
+### 目标
+
+测试一个复杂的多轮开发任务，涉及多次工具调用和人工干预。
+
+### 步骤1: 创建复杂任务
+
+```bash
+# 新建session
+python -m tinyagent message "/new" --workspace workspace
+
+# 第一轮：创建项目结构
+python -m tinyagent message "创建一个Python项目，包含以下结构：
+- src/calculator.py (实现加减乘除)
+- tests/test_calculator.py (单元测试)
+- README.md (项目说明)
+请使用bash工具创建文件和目录" --workspace workspace
+
+# 第二轮：检查实现
+python -m tinyagent message "读取 src/calculator.py 检查实现是否正确" --workspace workspace
+
+# 第三轮：人工干预（模拟发现问题）
+python -m tinyagent message "这个实现缺少除零保护，请修复并添加错误处理" --workspace workspace
+
+# 第四轮：运行测试
+python -m tinyagent message "运行测试验证修复是否正确" --workspace workspace
+
+# 第五轮：收尾
+python -m tinyagent message "总结一下这个项目的最终状态" --workspace workspace
+```
+
+### 步骤2: 从中间回合Replay
+
+```bash
+# 从第3回合开始replay（人工干预点）
+python -m tinyagent message "/replay 3" --workspace workspace
+```
+
+### 预期结果
+
+- Replay session 正确创建
+- 从第3回合（人工干预）开始重新执行
+- 模型重新生成对干预的响应
+- 最终输出与原始trace语义一致
+
+### 验证点
+
+- [ ] 项目结构正确创建
+- [ ] 代码修改被重新应用
+- [ ] 测试通过
+- [ ] Replay trace 与 original trace 语义一致
+
+---
+
 ## 通过标准
 
 所有测试必须通过：
-- [ ] 测试1: 基础Replay
-- [ ] 测试2: Real模式修改
-- [ ] 测试3: Fake模式修改
-- [ ] 测试4: VerifyTrace
-- [ ] 测试5: 边界条件
-- [ ] 测试6: 文件持久化
-- [ ] 测试7: 复杂对话
+- [x] 测试1: 基础Replay
+- [x] 测试2: Real模式修改
+- [x] 测试3: Fake模式修改
+- [x] 测试4: VerifyTrace
+- [x] 测试5: 边界条件
+- [x] 测试6: 文件持久化
+- [x] 测试7: 复杂对话
+- [ ] 测试8: 复杂多轮任务（Coding Task）
