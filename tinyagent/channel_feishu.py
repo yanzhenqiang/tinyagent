@@ -271,9 +271,6 @@ class FeishuChannel(BaseChannel):
             .log_level(lark.LogLevel.INFO) \
             .build()
 
-        # Get bot's own open_id for mention matching
-        await self._fetch_bot_info()
-
         builder = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
             self.config.verification_token or "",
@@ -339,32 +336,6 @@ class FeishuChannel(BaseChannel):
                 pass
 
         logger.info("Feishu bot stopped")
-
-    def _fetch_bot_info_sync(self) -> None:
-        """Fetch bot's own open_id for mention matching."""
-        from lark_oapi.api.bot.v2 import GetBotInfoRequest
-        try:
-            request = GetBotInfoRequest.builder().build()
-            response = self._client.bot.v2.info.get(request)
-            if response.success():
-                bot_info = getattr(response.data, "bot", None)
-                if bot_info:
-                    self._bot_open_id = getattr(bot_info, "open_id", None)
-                    logger.info("Feishu bot open_id: {}", self._bot_open_id)
-                else:
-                    logger.warning("GetBotInfo returned no bot data")
-            else:
-                logger.warning("Failed to get bot info: code={}, msg={}", response.code, response.msg)
-        except Exception as e:
-            logger.warning("Error fetching bot info: {}", e)
-            logger.debug("Bot info fetch error details: {}", e, exc_info=True)
-
-    async def _fetch_bot_info(self) -> None:
-        """Async wrapper for fetching bot info."""
-        if not self._client:
-            return
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._fetch_bot_info_sync)
 
     async def _send_startup_message(self) -> None:
         restart_info = os.environ.get("TINYAGENT_RESTART")
