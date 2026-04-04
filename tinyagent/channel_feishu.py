@@ -356,11 +356,17 @@ class FeishuChannel(BaseChannel):
         if "@_all" in raw_content:
             return True
 
-        for mention in getattr(message, "mentions", None) or []:
+        mentions = getattr(message, "mentions", None) or []
+        logger.debug("Checking mentions: {}", mentions)
+        for mention in mentions:
             mid = getattr(mention, "id", None)
             if not mid:
                 continue
-            if not getattr(mid, "user_id", None) and (getattr(mid, "open_id", None) or "").startswith("ou_"):
+            user_id = getattr(mid, "user_id", None)
+            open_id = getattr(mid, "open_id", None)
+            logger.debug("Mention: user_id={}, open_id={}", user_id, open_id)
+            # Bot mention: open_id starts with "ou_" (bot's open_id pattern)
+            if open_id and open_id.startswith("ou_"):
                 return True
         return False
 
