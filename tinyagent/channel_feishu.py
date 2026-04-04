@@ -1028,6 +1028,15 @@ class FeishuChannel(BaseChannel):
             chat_type = message.chat_type
             msg_type = message.message_type
 
+            # Debug logging for group messages
+            if chat_type == "group":
+                logger.info("Feishu group message: chat_id={}, sender_id={}, msg_type={}", chat_id, sender_id, msg_type)
+                logger.debug("Message content: {}", message.content)
+                logger.debug("Message mentions: {}", getattr(message, "mentions", None))
+                logger.debug("Bot open_id: {}", self._bot_open_id)
+                is_mentioned = self._is_bot_mentioned(message)
+                logger.info("Feishu: bot mentioned = {}", is_mentioned)
+
             if chat_type == "group" and not self._is_group_message_for_bot(message):
                 logger.info("Feishu: skipping group message (not mentioned)")
                 return
