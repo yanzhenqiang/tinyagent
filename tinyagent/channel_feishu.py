@@ -949,11 +949,19 @@ class FeishuChannel(BaseChannel):
                         )
 
             if msg.content and msg.content.strip():
-                fmt = self._detect_msg_format(msg.content)
+                content = msg.content.strip()
+
+                # Add @sender for group chat replies
+                if msg.chat_id.startswith("oc_"):
+                    sender_id = msg.metadata.get("sender_id")
+                    if sender_id:
+                        content = f"<at id=\"{sender_id}\"></at> {content}"
+
+                fmt = self._detect_msg_format(content)
 
                 if fmt == "text":
-                    # Short plain text – send as simple text message
-                    text_body = json.dumps({"text": msg.content.strip()}, ensure_ascii=False)
+                    # Short plain text – send as simple text message with at mention
+                    text_body = json.dumps({"text": content}, ensure_ascii=False)
                     await loop.run_in_executor(None, _do_send, "text", text_body)
 
                 elif fmt == "post":
@@ -1083,6 +1091,7 @@ class FeishuChannel(BaseChannel):
                     "msg_type": msg_type,
                     "parent_id": parent_id,
                     "root_id": root_id,
+                    "sender_id": sender_id,
                 }
             )
 
