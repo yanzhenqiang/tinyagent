@@ -359,20 +359,25 @@ class FeishuChannel(BaseChannel):
             return True
 
         mentions = getattr(message, "mentions", None) or []
+        if not mentions:
+            return False
+
         for mention in mentions:
-            mid = getattr(mention, "id", None)
-            if not mid:
-                continue
-            open_id = getattr(mid, "open_id", None)
-            # Match bot's own open_id if known, otherwise match bot pattern
-            if self._bot_open_id:
-                if open_id == self._bot_open_id:
-                    return True
-            else:
-                # Fallback: check if mention name contains bot indicator
-                name = getattr(mention, "name", "") or ""
-                if "bot" in name.lower() or "机器人" in name:
-                    return True
+            # mention.id is the open_id string, not an object
+            mention_id = getattr(mention, "id", None)
+            name = getattr(mention, "name", "") or ""
+
+            logger.debug("Checking mention: id={}, name={}", mention_id, name)
+
+            # Match by open_id if known
+            if self._bot_open_id and mention_id == self._bot_open_id:
+                return True
+
+            # Fallback: check name patterns for bot
+            name_lower = name.lower()
+            if any(x in name_lower for x in ["bot", "机器人", "mac-air"]):
+                return True
+
         return False
 
     def _is_group_message_for_bot(self, message: Any) -> bool:
