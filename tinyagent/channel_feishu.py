@@ -950,34 +950,39 @@ class FeishuChannel(BaseChannel):
 
             if msg.content and msg.content.strip():
                 content = msg.content.strip()
+                sender_id = msg.metadata.get("sender_id")
 
                 # Add @sender for group chat replies
-                if msg.chat_id.startswith("oc_"):
-                    sender_id = msg.metadata.get("sender_id")
-                    if sender_id:
-                        content = f"<at id=\"{sender_id}\"></at> {content}"
-
-                fmt = self._detect_msg_format(content)
-
-                if fmt == "text":
-                    # Short plain text – send as simple text message with at mention
-                    text_body = json.dumps({"text": content}, ensure_ascii=False)
-                    await loop.run_in_executor(None, _do_send, "text", text_body)
-
-                elif fmt == "post":
-                    # Medium content with links – send as rich-text post
-                    post_body = self._markdown_to_post(msg.content)
+                if msg.chat_id.startswith("oc_") and sender_id:
+                    # Use post format for @ mention
+                    post_body = json.dumps({
+                        "zh_cn": {
+                            "content": [
+                                [{"tag": "at", "user_id": sender_id}, {"tag": "text", "text": f" {content}"}]
+                            ]
+                        }
+                    }, ensure_ascii=False)
                     await loop.run_in_executor(None, _do_send, "post", post_body)
-
                 else:
-                    # Complex / long content – send as interactive card
-                    elements = self._build_card_elements(msg.content)
-                    for chunk in self._split_elements_by_table_limit(elements):
-                        card = {"config": {"wide_screen_mode": True}, "elements": chunk}
-                        await loop.run_in_executor(
-                            None, _do_send,
-                            "interactive", json.dumps(card, ensure_ascii=False),
-                        )
+                    fmt = self._detect_msg_format(content)
+
+                    if fmt == "text":
+                        # Short plain text – send as simple text message
+                        text_body = json.dumps({"text": content}, ensure_ascii=False)
+                        await loop.run_in_executor(None, _do_send, "text", text_body)
+                    elif fmt == "post":
+                        # Medium content with links – send as rich-text post
+                        post_body = self._markdown_to_post(msg.content)
+                        await loop.run_in_executor(None, _do_send, "post", post_body)
+                    else:
+                        # Complex / long content – send as interactive card
+                        elements = self._build_card_elements(msg.content)
+                        for chunk in self._split_elements_by_table_limit(elements):
+                            card = {"config": {"wide_screen_mode": True}, "elements": chunk}
+                            await loop.run_in_executor(
+                                None, _do_send,
+                                "interactive", json.dumps(card, ensure_ascii=False),
+                            )
 
         except Exception as e:
             logger.error("Error sending Feishu message: {}", e)
