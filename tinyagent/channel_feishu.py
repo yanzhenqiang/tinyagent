@@ -247,6 +247,7 @@ class FeishuChannel(BaseChannel):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._channel_config = channel_config
         self._outbound_task: asyncio.Task | None = None
+        self._bot_open_id: str | None = None
 
     @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
@@ -269,6 +270,10 @@ class FeishuChannel(BaseChannel):
             .app_secret(self.config.app_secret) \
             .log_level(lark.LogLevel.INFO) \
             .build()
+
+        # Get bot's own open_id for mention matching
+        await self._fetch_bot_info()
+
         builder = lark.EventDispatcherHandler.builder(
             self.config.encrypt_key or "",
             self.config.verification_token or "",
@@ -335,6 +340,29 @@ class FeishuChannel(BaseChannel):
 
         logger.info("Feishu bot stopped")
 
+    def _fetch_bot_info_sync(self) -> None:
+        """Fetch bot's own open_id for mention matching."""
+        from lark_oapi.api.bot.v2 import GetBotInfoRequest
+        try:
+            request = GetBotInfoRequest.builder().build()
+            response = self._client.bot.v2.info.get(request)
+            if response.success():
+                bot_info = getattr(response.data, "bot", None)
+                if bot_info:
+                    self._bot_open_id = getattr(bot_info, "open_id", None)
+                    logger.info("Feishu bot open_id: {}", self._bot_open_id)
+            else:
+                logger.warning("Failed to get bot info: code={}, msg={}", response.code, response.msg)
+        except Exception as e:
+            logger.warning("Error fetching bot info: {}", e)
+
+    async def _fetch_bot_info(self) -> None:
+        """Async wrapper for fetching bot info."""
+        if not self._client:
+            return
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._fetch_bot_info_sync)
+
     async def _send_startup_message(self) -> None:
         restart_info = os.environ.get("TINYAGENT_RESTART")
         if not restart_info:
@@ -357,16 +385,13 @@ class FeishuChannel(BaseChannel):
             return True
 
         mentions = getattr(message, "mentions", None) or []
-        logger.debug("Checking mentions: {}", mentions)
         for mention in mentions:
             mid = getattr(mention, "id", None)
             if not mid:
                 continue
-            user_id = getattr(mid, "user_id", None)
             open_id = getattr(mid, "open_id", None)
-            logger.debug("Mention: user_id={}, open_id={}", user_id, open_id)
-            # Bot mention: open_id starts with "ou_" (bot's open_id pattern)
-            if open_id and open_id.startswith("ou_"):
+            # Match bot's own open_id
+            if open_id and open_id == self._bot_open_id:
                 return True
         return False
 
