@@ -351,10 +351,13 @@ class FeishuChannel(BaseChannel):
                 if bot_info:
                     self._bot_open_id = getattr(bot_info, "open_id", None)
                     logger.info("Feishu bot open_id: {}", self._bot_open_id)
+                else:
+                    logger.warning("GetBotInfo returned no bot data")
             else:
                 logger.warning("Failed to get bot info: code={}, msg={}", response.code, response.msg)
         except Exception as e:
             logger.warning("Error fetching bot info: {}", e)
+            logger.debug("Bot info fetch error details: {}", e, exc_info=True)
 
     async def _fetch_bot_info(self) -> None:
         """Async wrapper for fetching bot info."""
@@ -390,9 +393,15 @@ class FeishuChannel(BaseChannel):
             if not mid:
                 continue
             open_id = getattr(mid, "open_id", None)
-            # Match bot's own open_id
-            if open_id and open_id == self._bot_open_id:
-                return True
+            # Match bot's own open_id if known, otherwise match bot pattern
+            if self._bot_open_id:
+                if open_id == self._bot_open_id:
+                    return True
+            else:
+                # Fallback: check if mention name contains bot indicator
+                name = getattr(mention, "name", "") or ""
+                if "bot" in name.lower() or "机器人" in name:
+                    return True
         return False
 
     def _is_group_message_for_bot(self, message: Any) -> bool:
